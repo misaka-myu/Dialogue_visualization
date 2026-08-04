@@ -39,8 +39,11 @@ export const useStore = create<State>((set, get) => ({
   },
   openSession: async (sourcePath) => {
     set({ loading: true });
-    const session = await window.api.loadSession(sourcePath);
-    get().setCurrentSession(session);
-    set({ loading: false });
+    try {
+      const session = await window.api.loadSession(sourcePath);
+      get().setCurrentSession(session);
+    } finally {
+      set({ loading: false });
+    }
   },
 }));
