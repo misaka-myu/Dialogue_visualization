@@ -1,0 +1,4 @@
+{"sessionId":"sess-1","cwd":"/tmp/project","timestamp":"2026-08-01T10:00:00Z"}
+{"type":"user","message":{"role":"user","content":"帮我修 bug"},"sessionId":"sess-1","timestamp":"2026-08-01T10:00:01Z"}
+{"type":"assistant","message":{"role":"assistant","content":"我来看看"},"sessionId":"sess-1","timestamp":"2026-08-01T10:00:02Z"}
+{"type":"assistant","message":{"role":"assistant","content":"找到问题了"},"sessionId":"sess-1","timestamp":"2026-08-01T10:00:03Z"}
