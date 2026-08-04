@@ -1,0 +1,6 @@
+appId: com.dialogueviz.app
+productName: DialogueViz
+directories:
+  output: dist
+files:
+  - out/**/*

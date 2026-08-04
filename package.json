@@ -1,0 +1,28 @@
+{
+  "name": "dialogue-viz",
+  "version": "0.1.0",
+  "description": "Visualize the request data Claude Code/Codex send to LLM APIs",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-vite": "^2.3.0",
+    "electron-builder": "^24.13.3",
+    "vite": "^5.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "zustand": "^4.5.0",
+    "@vitejs/plugin-react": "^4.3.0"
+  }
+}
