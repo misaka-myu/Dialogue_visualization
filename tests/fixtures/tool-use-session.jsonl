@@ -1,0 +1,5 @@
+{"sessionId":"tu-sess","cwd":"/tmp/p","timestamp":"2026-08-01T10:00:00Z"}
+{"type":"user","message":{"role":"user","content":"读文件"},"sessionId":"tu-sess","timestamp":"2026-08-01T10:00:01Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"好的"},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"a.ts"}}]},"sessionId":"tu-sess","timestamp":"2026-08-01T10:00:02Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"文件内容"}]},"sessionId":"tu-sess","timestamp":"2026-08-01T10:00:03Z"}
+{"type":"assistant","message":{"role":"assistant","content":"这是文件内容"},"sessionId":"tu-sess","timestamp":"2026-08-01T10:00:04Z"}

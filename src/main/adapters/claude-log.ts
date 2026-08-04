@@ -1,7 +1,7 @@
 // src/main/adapters/claude-log.ts
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
-import { Session, emptyUsage } from '../model/types';
+import { Session, ApiRequest, Message, emptyUsage } from '../model/types';
 import { normalizeContent } from '../model/normalizer';
 
 const TITLE_MAX_CHARS = 80;
@@ -127,4 +127,85 @@ function extractText(content: unknown): string {
       .join('');
   }
   return '';
+}
+
+interface JsonlLine {
+  type?: string;
+  message?: { role?: string; content?: unknown };
+  sessionId?: string;
+  cwd?: string;
+  timestamp?: string;
+  isMeta?: boolean;
+  customTitle?: string;
+}
+
+interface ConvoMessage {
+  role: 'user' | 'assistant' | 'tool';
+  content: import('../model/types').ContentBlock[];
+  ts?: number;
+}
+
+export function loadClaudeSession(path: string): Session {
+  const text = readFileSync(path, 'utf-8');
+  const lines = text.split('\n').filter((l) => l.trim().length > 0);
+
+  const convo: ConvoMessage[] = [];
+  let sessionId: string | undefined;
+  let cwd: string | undefined;
+  let firstTs: number | undefined;
+  let lastTs: number | undefined;
+
+  for (const line of lines) {
+    let obj: JsonlLine;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (obj.isMeta) continue;
+    if (obj.sessionId) sessionId = obj.sessionId;
+    if (obj.cwd) cwd = obj.cwd;
+    const ts = parseTimestampToMs(obj.timestamp);
+    if (ts !== undefined) {
+      if (firstTs === undefined) firstTs = ts;
+      lastTs = ts;
+    }
+    const msg = obj.message;
+    if (!msg || !msg.role) continue;
+    const content = normalizeContent(msg.content);
+    if (content.length === 0) continue;
+    let role = msg.role as ConvoMessage['role'];
+    if (role === 'user' && content.every((b) => b.type === 'tool_result')) {
+      role = 'tool';
+    }
+    convo.push({ role, content, ts });
+  }
+
+  const requests: ApiRequest[] = [];
+  let pending: Message[] = [];
+  for (const m of convo) {
+    if (m.role === 'assistant') {
+      const reqId = `${sessionId ?? 'sess'}-${requests.length}`;
+      requests.push({
+        id: reqId,
+        timestamp: m.ts ?? lastTs ?? Date.now(),
+        model: '',
+        system: [],
+        messages: pending.map((p) => ({ ...p })),
+        params: { maxTokens: 0 },
+        response: { content: m.content, stopReason: '', usage: emptyUsage() },
+      });
+      pending = [...pending, { role: 'assistant', content: m.content }];
+    } else {
+      pending.push({ role: m.role, content: m.content });
+    }
+  }
+
+  const meta = parseSessionMeta(path);
+  return {
+    id: sessionId ?? basename(path),
+    source: 'claude-code-log',
+    client: 'claude-code',
+    startedAt: firstTs ?? Date.now(),
+    endedAt: lastTs,
+    title: meta?.title,
+    projectDir: cwd ?? meta?.projectDir,
+    requests,
+  };
 }
