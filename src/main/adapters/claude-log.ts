@@ -177,8 +177,8 @@ export function loadClaudeSession(path: string): Session {
     convo.push({ role, content, ts });
   }
 
+  const conversation: Message[] = [];
   const requests: ApiRequest[] = [];
-  let pending: Message[] = [];
   for (const m of convo) {
     if (m.role === 'assistant') {
       const reqId = `${sessionId ?? 'sess'}-${requests.length}`;
@@ -187,13 +187,13 @@ export function loadClaudeSession(path: string): Session {
         timestamp: m.ts ?? lastTs ?? Date.now(),
         model: '',
         system: [],
-        messages: pending.map((p) => ({ ...p })),
+        messageCount: conversation.length,
         params: { maxTokens: 0 },
         response: { content: m.content, stopReason: '', usage: emptyUsage() },
       });
-      pending = [...pending, { role: 'assistant', content: m.content }];
+      conversation.push({ role: 'assistant', content: m.content });
     } else {
-      pending.push({ role: m.role, content: m.content });
+      conversation.push({ role: m.role, content: m.content });
     }
   }
 
@@ -207,5 +207,6 @@ export function loadClaudeSession(path: string): Session {
     title: meta?.title,
     projectDir: cwd ?? meta?.projectDir,
     requests,
+    conversation,
   };
 }

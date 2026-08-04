@@ -3,6 +3,14 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
 
+const MAX_RENDERED_MESSAGES = 200;
+const MAX_CONTENT_CHARS = 5000;
+
+function truncateText(text: string): string {
+  if (text.length <= MAX_CONTENT_CHARS) return text;
+  return text.slice(0, MAX_CONTENT_CHARS) + `… (截断，共 ${text.length} 字符)`;
+}
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
@@ -10,29 +18,31 @@ function estimateTokens(text: string): number {
 function Block({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case 'text':
-      return <div style={{ whiteSpace: 'pre-wrap' }}>{block.text}</div>;
+      return <div style={{ whiteSpace: 'pre-wrap' }}>{truncateText(block.text)}</div>;
     case 'tool_use':
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
           <span>🔧 <strong>tool_use: {block.name}</strong></span>
           <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto' }}>
-            {JSON.stringify(block.input, null, 2)}
+            {truncateText(JSON.stringify(block.input, null, 2))}
           </pre>
         </div>
       );
-    case 'tool_result':
+    case 'tool_result': {
+      const raw = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(129,199,132,0.1)', borderLeft: '3px solid #81c784', borderRadius: '0 4px 4px 0', fontSize: 12 }}>
           <span style={{ color: '#81c784', fontWeight: 600 }}>📥 tool_result</span>
           <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto' }}>
-            {typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2)}
+            {truncateText(raw)}
           </pre>
         </div>
       );
+    }
     case 'thinking':
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(206,147,216,0.1)', borderRadius: 4, fontSize: 12, opacity: 0.7 }}>
-          💭 {block.thinking}
+          💭 {truncateText(block.thinking)}
         </div>
       );
     default:
@@ -60,11 +70,15 @@ function Message({ role, blocks }: { role: string; blocks: ContentBlock[] }) {
 
 export function ChatFlowView() {
   const req = useStore((s) => s.currentRequest);
+  const messages = useStore((s) => s.currentRequestMessages);
   const [systemOpen, setSystemOpen] = useState(false);
 
   if (!req) {
     return <div style={{ padding: 24, opacity: 0.5 }}>选中一个会话和请求以查看对话流</div>;
   }
+
+  const capped = messages.slice(0, MAX_RENDERED_MESSAGES);
+  const overflow = messages.length - capped.length;
 
   return (
     <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
@@ -79,7 +93,12 @@ export function ChatFlowView() {
           {systemOpen && req.system.map((b, i) => <Block key={i} block={b} />)}
         </div>
       )}
-      {req.messages.map((m, i) => (
+      {overflow > 0 && (
+        <div style={{ padding: '4px 8px', marginBottom: 6, fontSize: 11, opacity: 0.6, background: 'rgba(255,183,77,0.06)', borderRadius: 4 }}>
+          显示前 {MAX_RENDERED_MESSAGES} 条，共 {messages.length} 条
+        </div>
+      )}
+      {capped.map((m, i) => (
         <Message key={i} role={m.role} blocks={m.content} />
       ))}
       {req.response && (

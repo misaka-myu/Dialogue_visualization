@@ -73,7 +73,7 @@ export function normalizeAnthropicRequest(body: RawBlock, timestamp: number, id:
     timestamp,
     model: body.model ?? '',
     system: normalizeSystem(body.system),
-    messages: normalizeMessages(body.messages),
+    messageCount: normalizeMessages(body.messages).length,
     tools: normalizeTools(body.tools),
     params: normalizeParams(body),
     metadata: body.metadata,

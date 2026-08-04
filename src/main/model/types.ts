@@ -47,7 +47,9 @@ export interface ApiRequest {
   timestamp: number;
   model: string;
   system: ContentBlock[];
-  messages: Message[];
+  /** Number of conversation messages preceding this request's assistant response.
+   *  The input messages for this request = session.conversation.slice(0, messageCount). */
+  messageCount: number;
   tools?: ToolDef[];
   params: ModelParams;
   metadata?: Record<string, unknown>;
@@ -64,6 +66,9 @@ export interface Session {
   title?: string;
   projectDir?: string;
   requests: ApiRequest[];
+  /** Flat linear conversation array — each message stored exactly once.
+   *  A request's input messages = conversation.slice(0, request.messageCount). */
+  conversation: Message[];
   totalTokens?: number;
 }
 

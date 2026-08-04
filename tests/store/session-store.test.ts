@@ -15,7 +15,7 @@ describe('SessionStore', () => {
     const store = new SessionStore(tmpDir);
     const session: Session = {
       id: 's1', source: 'proxy-live', client: 'claude-code',
-      startedAt: 1000, title: 'test', requests: [],
+      startedAt: 1000, title: 'test', requests: [], conversation: [],
     };
     const path = store.saveSession(session);
     expect(existsSync(path)).toBe(true);
@@ -26,14 +26,14 @@ describe('SessionStore', () => {
 
   it('listSessions 返回所有已存会话的 id', () => {
     const store = new SessionStore(tmpDir);
-    store.saveSession({ id: 'a', source: 'proxy-live', client: 'claude-code', startedAt: 1, requests: [] });
-    store.saveSession({ id: 'b', source: 'proxy-live', client: 'claude-code', startedAt: 2, requests: [] });
+    store.saveSession({ id: 'a', source: 'proxy-live', client: 'claude-code', startedAt: 1, requests: [], conversation: [] });
+    store.saveSession({ id: 'b', source: 'proxy-live', client: 'claude-code', startedAt: 2, requests: [], conversation: [] });
     expect(store.listSessions().sort()).toEqual(['a', 'b']);
   });
 
   it('deleteSession 删除文件', () => {
     const store = new SessionStore(tmpDir);
-    store.saveSession({ id: 'x', source: 'proxy-live', client: 'claude-code', startedAt: 1, requests: [] });
+    store.saveSession({ id: 'x', source: 'proxy-live', client: 'claude-code', startedAt: 1, requests: [], conversation: [] });
     expect(store.deleteSession('x')).toBe(true);
     expect(store.loadSession('x')).toBeNull();
   });

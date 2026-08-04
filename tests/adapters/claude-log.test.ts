@@ -32,33 +32,35 @@ describe('scanClaudeSessions', () => {
 });
 
 describe('loadClaudeSession', () => {
-  it('把 assistant 消息重建为请求的响应，messages 累积', () => {
+  it('把 assistant 消息重建为请求的响应，conversation 线性累积', () => {
     const session = loadClaudeSession(resolve(fixturesDir, 'simple-session.jsonl'));
     expect(session.client).toBe('claude-code');
     expect(session.source).toBe('claude-code-log');
     // 2 个 assistant 消息 -> 2 个 ApiRequest
     expect(session.requests).toHaveLength(2);
 
-    // 第 1 个请求：messages = [user "帮我修 bug"]，response = "我来看看"
-    expect(session.requests[0].messages).toEqual([
-      { role: 'user', content: [{ type: 'text', text: '帮我修 bug' }] },
-    ]);
+    // conversation 扁平数组，3 条消息（user + 2 assistant）
+    expect(session.conversation).toHaveLength(3);
+    expect(session.conversation[0]).toEqual({ role: 'user', content: [{ type: 'text', text: '帮我修 bug' }] });
+    expect(session.conversation[1]).toEqual({ role: 'assistant', content: [{ type: 'text', text: '我来看看' }] });
+
+    // 第 1 个请求：messageCount = 1（conversation 前 1 条 = [user]），response = "我来看看"
+    expect(session.requests[0].messageCount).toBe(1);
     expect(session.requests[0].response?.content).toEqual([{ type: 'text', text: '我来看看' }]);
 
-    // 第 2 个请求：messages 累积了第 1 个 assistant，response = "找到问题了"
-    expect(session.requests[1].messages).toHaveLength(2);
-    expect(session.requests[1].messages[1]).toEqual({ role: 'assistant', content: [{ type: 'text', text: '我来看看' }] });
+    // 第 2 个请求：messageCount = 2（累积了第 1 个 assistant），response = "找到问题了"
+    expect(session.requests[1].messageCount).toBe(2);
     expect(session.requests[1].response?.content).toEqual([{ type: 'text', text: '找到问题了' }]);
   });
 
   it('tool_result 在 user 消息里被重分类为 tool 角色', () => {
     const session = loadClaudeSession(resolve(fixturesDir, 'tool-use-session.jsonl'));
     expect(session.requests).toHaveLength(2);
-    // 第 1 个请求的 messages = [user "读文件"]
-    // 第 2 个请求的 messages = [user, assistant(带 tool_use), tool(tool_result)]
-    const req2 = session.requests[1];
-    expect(req2.messages[2].role).toBe('tool');
-    expect(req2.messages[2].content[0]).toMatchObject({ type: 'tool_result', toolUseId: 'tu_1' });
+    // conversation 第 3 条（index 2）是 tool 角色，含 tool_result
+    expect(session.conversation[2].role).toBe('tool');
+    expect(session.conversation[2].content[0]).toMatchObject({ type: 'tool_result', toolUseId: 'tu_1' });
+    // 第 2 个请求的 messageCount = 3（user + assistant + tool）
+    expect(session.requests[1].messageCount).toBe(3);
   });
 
   it('日志不含 system/tools/params，这些字段为空或默认', () => {

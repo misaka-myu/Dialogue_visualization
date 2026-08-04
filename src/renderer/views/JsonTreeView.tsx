@@ -60,13 +60,15 @@ function JsonNode({ label, value, defaultOpen = true, depth }: NodeProps) {
 
 export function JsonTreeView() {
   const req = useStore((s) => s.currentRequest);
+  const messages = useStore((s) => s.currentRequestMessages);
   if (!req) {
     return <div style={{ padding: 24, opacity: 0.5 }}>选中一个会话和请求以查看 JSON 结构</div>;
   }
-  const view: Partial<ApiRequest> = {
+  const view: Partial<ApiRequest> & { messages: typeof messages } = {
     model: req.model,
     system: req.system,
-    messages: req.messages,
+    messageCount: req.messageCount,
+    messages,
     tools: req.tools,
     params: req.params,
     response: req.response,

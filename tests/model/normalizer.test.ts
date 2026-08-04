@@ -36,7 +36,7 @@ describe('normalizeAnthropicRequest', () => {
     const req = normalizeAnthropicRequest(body, 1000, 'r1');
     expect(req.model).toBe('claude-sonnet-5');
     expect(req.system).toEqual([{ type: 'text', text: '你是 Claude Code' }]);
-    expect(req.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: '帮我修 bug' }] }]);
+    expect(req.messageCount).toBe(1);
     expect(req.params).toEqual({ maxTokens: 8192, temperature: 1.0 });
     expect(req.tools).toBeUndefined();
   });
