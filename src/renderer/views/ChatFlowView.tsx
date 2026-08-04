@@ -69,12 +69,13 @@ function Message({ role, blocks }: { role: string; blocks: ContentBlock[] }) {
 }
 
 export function ChatFlowView() {
-  const req = useStore((s) => s.currentRequest);
-  const messages = useStore((s) => s.currentRequestMessages);
+  const session = useStore((s) => s.currentSession);
+  const messages = session?.conversation ?? [];
+  const system = session?.requests?.[0]?.system ?? [];
   const [systemOpen, setSystemOpen] = useState(false);
 
-  if (!req) {
-    return <div style={{ padding: 24, opacity: 0.5 }}>选中一个会话和请求以查看对话流</div>;
+  if (!session) {
+    return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
   }
 
   const capped = messages.slice(0, MAX_RENDERED_MESSAGES);
@@ -82,15 +83,15 @@ export function ChatFlowView() {
 
   return (
     <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
-      {req.system.length > 0 && (
+      {system.length > 0 && (
         <div style={{ marginBottom: 6 }}>
           <button
             onClick={() => setSystemOpen(!systemOpen)}
             style={{ padding: '4px 8px', background: 'rgba(255,183,77,0.08)', border: 'none', borderRadius: 4, cursor: 'pointer', color: 'inherit' }}
           >
-            ⚙️ SYSTEM · {req.system.reduce((n, b) => n + (b.type === 'text' ? b.text.length : 0), 0)} 字 {systemOpen ? '▼' : '▶'}
+            ⚙️ SYSTEM · {system.reduce((n, b) => n + (b.type === 'text' ? b.text.length : 0), 0)} 字 {systemOpen ? '▼' : '▶'}
           </button>
-          {systemOpen && req.system.map((b, i) => <Block key={i} block={b} />)}
+          {systemOpen && system.map((b, i) => <Block key={i} block={b} />)}
         </div>
       )}
       {overflow > 0 && (
@@ -101,9 +102,6 @@ export function ChatFlowView() {
       {capped.map((m, i) => (
         <Message key={i} role={m.role} blocks={m.content} />
       ))}
-      {req.response && (
-        <Message role="assistant" blocks={req.response.content} />
-      )}
     </div>
   );
 }

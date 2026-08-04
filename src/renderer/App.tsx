@@ -30,7 +30,7 @@ export function App() {
           {!currentSession ? (
             <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>
           ) : (
-            <ErrorBoundary>
+            <ErrorBoundary key={currentView}>
               {currentView === 'json-tree' ? <JsonTreeView /> : <ChatFlowView />}
             </ErrorBoundary>
           )}

@@ -23,8 +23,8 @@ interface NodeProps {
 function JsonNode({ label, value, defaultOpen = true, depth }: NodeProps) {
   const [open, setOpen] = useState(defaultOpen);
 
-  if (value === null) {
-    return <div style={{ paddingLeft: depth * 14 }}>{label && <span style={{ color: '#9b8cff' }}>{label}: </span>}<span style={{ opacity: 0.5 }}>null</span></div>;
+  if (value === null || value === undefined) {
+    return <div style={{ paddingLeft: depth * 14 }}>{label && <span style={{ color: '#9b8cff' }}>{label}: </span>}<span style={{ opacity: 0.5 }}>{value === null ? 'null' : 'undefined'}</span></div>;
   }
   if (typeof value === 'string') {
     return <div style={{ paddingLeft: depth * 14 }}>{label && <span style={{ color: '#9b8cff' }}>{label}: </span>}<span style={{ color: '#90caf9' }}>"{value.length > 80 ? value.slice(0, 80) + '…' : value}"</span></div>;
