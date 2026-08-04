@@ -1,0 +1,8 @@
+/* src/renderer/styles.css */
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, 'Segoe UI', sans-serif; background: #1e1e1e; color: #ddd; }
+button { font-family: inherit; }
+#root { height: 100vh; display: flex; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
