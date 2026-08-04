@@ -179,6 +179,15 @@ files:
 </html>
 ```
 
+- [ ] **步骤 6b：创建 vitest.config.ts**
+
+```typescript
+import { defineConfig } from 'vitest/config';
+export default defineConfig({
+  test: { environment: 'node' },
+});
+```
+
 - [ ] **步骤 7：安装依赖**
 
 运行：`npm install`
@@ -1077,6 +1086,7 @@ export function registerIpc(): void {
 ```typescript
 // src/main/index.ts
 import { app, BrowserWindow } from 'electron';
+import { join } from 'path';
 import { registerIpc } from './ipc';
 
 function createWindow(): void {
