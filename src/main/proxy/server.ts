@@ -2,6 +2,7 @@
 import express from 'express';
 import { Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
 import { ApiRequest } from '../model/types';
 import { normalizeAnthropicRequest, normalizeAnthropicResponse, normalizeMessages } from '../model/normalizer';
 import { detectUpstream } from './upstream';
@@ -96,14 +97,9 @@ async function handleMessages(
   const apiReq = normalizeAnthropicRequest(body, timestamp, genId());
   apiReq.inputMessages = normalizeMessages(body.messages);
 
-  // Build forwarded headers - copy everything except host (let fetch set it).
-  const forwardHeaders: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (key.toLowerCase() === 'host') continue;
-    if (typeof value === 'string') {
-      forwardHeaders[key] = value;
-    }
-  }
+  // Build forwarded headers — drop hop-by-hop, proxy-internal, and any
+  // header we've explicitly reserved for the proxy layer.
+  const forwardHeaders = buildForwardHeaders(req);
 
   const upstreamUrl = `${upstream}/v1/messages`;
   const isStream = body.stream === true;
@@ -206,13 +202,7 @@ async function passthrough(
   res: express.Response,
   upstream: string,
 ): Promise<void> {
-  const forwardHeaders: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (key.toLowerCase() === 'host') continue;
-    if (typeof value === 'string') {
-      forwardHeaders[key] = value;
-    }
-  }
+  const forwardHeaders = buildForwardHeaders(req);
 
   const path = req.originalUrl;
   const upstreamUrl = `${upstream}${path}`;
@@ -253,5 +243,47 @@ function copyResponseHeaders(upstreamRes: Response, res: express.Response): void
 }
 
 function genId(): string {
-  return `proxy_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  // Crypto-strong uniqueness — these IDs land in persisted capture files
+  // and we want zero collision risk across captures.
+  return `proxy_${Date.now()}_${randomUUID()}`;
+}
+
+/** Headers we never forward upstream. `host` would clobber the target host
+ *  on the way out; `connection` / `proxy-*` are hop-by-hop or proxy-internal
+ *  and shouldn't leak; `content-length` is recomputed by fetch from the body
+ *  anyway. The `x-proxy-key` header is reserved for a future shared-secret
+ *  auth scheme and must never reach the upstream provider. */
+const SKIPPED_REQUEST_HEADERS = new Set([
+  'host',
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+  'content-length',
+  'x-proxy-key',
+]);
+
+function isProxyInternalHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (SKIPPED_REQUEST_HEADERS.has(lower)) return true;
+  if (lower.startsWith('proxy-')) return true;
+  return false;
+}
+
+/** Build a header bag safe to forward to the upstream API. Drops hop-by-hop
+ *  headers, proxy-internal headers (incl. future auth keys), and anything
+ *  that isn't a plain string. */
+function buildForwardHeaders(req: express.Request): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (isProxyInternalHeader(key)) continue;
+    if (typeof value === 'string') {
+      out[key] = value;
+    }
+  }
+  return out;
 }
