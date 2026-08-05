@@ -89,7 +89,7 @@ export const useStore = create<State>((set, get) => ({
       if (req.inputMessages) {
         conversation = [...req.inputMessages];
         if (req.response) {
-          conversation = [...conversation, { role: 'assistant', content: req.response.content }];
+          conversation = [...conversation, { role: 'assistant', content: req.response.content, meta: { outputTokens: req.response.usage.outputTokens || undefined, model: req.response.usage.model } }];
         }
       }
       set({ currentSession: { ...s, requests, conversation } });

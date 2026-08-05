@@ -60,7 +60,8 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
     if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
     return '';
   }).join('');
-  const toks = estimateTokens(fullText);
+  const toks = meta?.outputTokens != null ? meta.outputTokens : estimateTokens(fullText);
+  const tokLabel = meta?.outputTokens != null ? `${toks} tok ✓` : `${toks} tok ≈`;
   const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
   return (
     <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
@@ -69,7 +70,7 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
         style={{ fontSize: 10, fontWeight: 600, opacity: 0.7, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
       >
         <span style={{ opacity: 0.6 }}>{open ? '▼' : '▶'}</span>
-        <span>{c.icon} {c.label} · {toks} tok</span>
+        <span>{c.icon} {c.label} · {tokLabel}</span>
         {meta?.model && <span style={{ color: '#ffb74d' }}>🤖 {meta.model}</span>}
         {meta?.effort && <span style={{ opacity: 0.6 }}>effort: {meta.effort}</span>}
         {meta?.isSidechain && <span style={{ color: '#ff8a65' }}>↳ 侧链</span>}

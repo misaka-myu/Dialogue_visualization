@@ -205,9 +205,10 @@ export function loadClaudeSession(path: string): Session {
         userType: obj.userType,
         entrypoint: obj.entrypoint,
         promptId: obj.promptId,
-        model: msg.model,
+        outputTokens: msg.usage && typeof msg.usage.output_tokens === 'number' ? msg.usage.output_tokens : undefined,
       },
     });
+
   }
 
   const conversation: Message[] = [];

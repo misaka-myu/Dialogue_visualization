@@ -22,6 +22,8 @@ export interface MessageMeta {
   entrypoint?: string;
   promptId?: string;
   model?: string;
+  /** Real output_tokens for an assistant message (from the response usage). */
+  outputTokens?: number;
 }
 
 export interface Message {
