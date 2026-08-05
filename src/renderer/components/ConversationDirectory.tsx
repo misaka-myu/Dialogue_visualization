@@ -140,14 +140,12 @@ function Row({ message, index, active }: { message: Message; index: number; acti
     v?.scrollToIndex({ index, align: 'start', behavior: 'smooth' });
   }, [index]);
 
-  const copyText = useCallback(async () => {
-    const ok = await copyToClipboard(toPlainText(message.content), '文本');
-    if (ok) window.alert('已复制文本到剪贴板。');
+  const copyText = useCallback(() => {
+    void copyToClipboard(toPlainText(message.content), '文本');
   }, [message.content]);
 
-  const copyJson = useCallback(async () => {
-    const ok = await copyToClipboard(toCopyJSON(message), 'JSON');
-    if (ok) window.alert('已复制 JSON 到剪贴板。');
+  const copyJson = useCallback(() => {
+    void copyToClipboard(toCopyJSON(message), 'JSON');
   }, [message]);
 
   return (

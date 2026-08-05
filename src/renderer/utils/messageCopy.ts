@@ -1,5 +1,6 @@
 // src/renderer/utils/messageCopy.ts
 import type { ContentBlock, Message } from '../../main/model/types';
+import { useStore } from '../store';
 
 /** Concatenate the text-bearing parts of a message's content blocks,
  *  separated by blank lines, suitable for pasting into chat / docs. */
@@ -32,18 +33,20 @@ export function toCopyJSON(message: Message): string {
   );
 }
 
-/** Write to clipboard; on failure surface a user-readable message. */
+/** Write to clipboard and surface the result via a transient toast (not a
+ *  blocking dialog). On failure, the toast explains why. */
 export async function copyToClipboard(text: string, kind: '文本' | 'JSON'): Promise<boolean> {
   try {
     if (!navigator.clipboard) {
-      window.alert(`无法访问剪贴板 API。复制${kind}失败。`);
+      useStore.getState().setToast(`无法访问剪贴板 API — 复制${kind}失败。`);
       return false;
     }
     await navigator.clipboard.writeText(text);
+    useStore.getState().setToast(`已复制${kind}到剪贴板。`);
     return true;
   } catch (err) {
     console.error(`[copy] ${kind} copy failed:`, err);
-    window.alert(`复制${kind}失败，请检查浏览器/系统权限。`);
+    useStore.getState().setToast(`复制${kind}失败，请检查浏览器/系统权限。`);
     return false;
   }
 }
