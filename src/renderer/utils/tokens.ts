@@ -1,5 +1,6 @@
 // src/renderer/utils/tokens.ts
 import type { Message } from '../../main/model/types';
+import { extractMessageText } from './messageContent';
 
 /** Returns token info for a message: real count if the API reported one
  *  (assistant only), else an estimate from text length (chars / 4). The
@@ -8,18 +9,7 @@ export function getMessageTokenInfo(m: Message): { count: number; real: boolean 
   if (m.role === 'assistant' && m.meta?.outputTokens != null) {
     return { count: m.meta.outputTokens, real: true };
   }
-  const text = m.content
-    .map((b) => {
-      if (b.type === 'text') return b.text;
-      if (b.type === 'thinking') return b.thinking;
-      if (b.type === 'tool_use') return b.name + ' ' + JSON.stringify(b.input);
-      if (b.type === 'tool_result') {
-        return typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-      }
-      return '';
-    })
-    .join('');
-  return { count: Math.ceil(text.length / 4), real: false };
+  return { count: Math.ceil(extractMessageText(m.content).length / 4), real: false };
 }
 
 export function formatTokenCount(n: number): string {
