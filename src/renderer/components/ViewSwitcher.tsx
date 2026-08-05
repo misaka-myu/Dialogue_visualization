@@ -12,8 +12,12 @@ export function ViewSwitcher() {
   const views: { kind: ViewKind; label: string }[] = [
     { kind: 'chat-flow', label: '对话流' },
     { kind: 'json-tree', label: 'JSON 树' },
-    { kind: 'raw-log', label: '原始日志' },
   ];
+  // Proxy-live captures only see structured API traffic, not the underlying
+  // JSONL, so the "raw-log" view has nothing meaningful to show.
+  if (!currentSession || currentSession.source !== 'proxy-live') {
+    views.push({ kind: 'raw-log', label: '原始日志' });
+  }
 
   const copyCmd = () => {
     if (!proxyStatus) return;
