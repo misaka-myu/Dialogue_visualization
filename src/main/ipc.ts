@@ -1,6 +1,6 @@
 // src/main/ipc.ts
 import { ipcMain, dialog, BrowserWindow, app } from 'electron';
-import { scanClaudeSessions, loadClaudeSession, SessionMeta } from './adapters/claude-log';
+import { scanClaudeSessions, loadClaudeSession, deleteClaudeSession, exportClaudeSession, SessionMeta } from './adapters/claude-log';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
@@ -168,6 +168,53 @@ export function registerIpc(): void {
 
   ipcMain.handle('live:delete', async (_e, path: string): Promise<boolean> => {
     return ensureLiveStore().deleteSession(path);
+  });
+
+  ipcMain.handle('live:rename', async (_e, path: string, newTitle: string): Promise<string | null> => {
+    try {
+      return ensureLiveStore().renameSession(path, newTitle);
+    } catch (err) {
+      console.error('[live-store] rename failed:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('live:export', async (_e, path: string, exportPath: string): Promise<string | null> => {
+    try {
+      return ensureLiveStore().exportSession(path, exportPath);
+    } catch (err) {
+      console.error('[live-store] export failed:', err);
+      return null;
+    }
+  });
+
+  // --- Claude Code history (destructive) IPC ---
+  ipcMain.handle('claude:delete', async (_e, sourcePath: string): Promise<boolean> => {
+    try {
+      return deleteClaudeSession(sourcePath);
+    } catch (err) {
+      console.error('[claude-log] delete failed:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('claude:export', async (_e, sourcePath: string, exportPath: string): Promise<string | null> => {
+    try {
+      return exportClaudeSession(sourcePath, exportPath);
+    } catch (err) {
+      console.error('[claude-log] export failed:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('claude:pickExportPath', async (_e, defaultName: string): Promise<string | null> => {
+    const windows = BrowserWindow.getAllWindows();
+    const win = windows[0];
+    const res = win
+      ? await dialog.showSaveDialog(win, { title: '导出会话', defaultPath: defaultName })
+      : await dialog.showSaveDialog({ title: '导出会话', defaultPath: defaultName });
+    if (res.canceled || !res.filePath) return null;
+    return res.filePath;
   });
 
   // --- Proxy lifecycle ---

@@ -1,6 +1,6 @@
 // src/main/adapters/claude-log.ts
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join, basename } from 'path';
+import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs';
+import { dirname, join, basename } from 'path';
 import { Session, ApiRequest, Message, MessageMeta } from '../model/types';
 import { normalizeContent } from '../model/normalizer';
 
@@ -256,4 +256,56 @@ export function loadClaudeSession(path: string): Session {
     conversation,
     rawLines,
   };
+}
+
+/** Delete a Claude Code JSONL session and any same-basename sidecar files.
+ *  Sidecars are files sharing the same basename without the `.jsonl`
+ *  extension (e.g. `<id>.jsonl` + `<id>.lock` / `<id>.meta.json`). Files
+ *  that merely share a string prefix with the basename are NOT touched —
+ *  the next character after the base must be `.` (or end of name).
+ *  Returns true on success, false if the source file is missing or IO
+ *  failed. Destructive — callers MUST show a strong confirmation. */
+export function deleteClaudeSession(sourcePath: string): boolean {
+  try {
+    if (!existsSync(sourcePath)) return false;
+    const sourceName = basename(sourcePath);
+    rmSync(sourcePath);
+    // Best-effort cleanup of any sidecar files with the same basename.
+    const dir = dirname(sourcePath);
+    const base = basename(sourcePath, '.jsonl');
+    let entries: string[];
+    try { entries = readdirSync(dir); } catch { return true; }
+    for (const name of entries) {
+      if (name === sourceName) continue;
+      // A sidecar must either equal the base (no extension) or start with
+      // `base + '.'`. Anything else (e.g. `base99.jsonl`) shares a string
+      // prefix but is a different session.
+      const isBareBase = name === base;
+      const isDotted = name.startsWith(`${base}.`);
+      if (!isBareBase && !isDotted) continue;
+      const full = join(dir, name);
+      // Only remove regular files in the same directory; never follow symlinks
+      // or wander into subdirs.
+      let st;
+      try { st = statSync(full); } catch { continue; }
+      if (!st.isFile()) continue;
+      try { rmSync(full); } catch { /* ignore sidecar errors */ }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Copy a Claude Code JSONL session to `exportPath` (an absolute path the
+ *  caller chose via a save dialog). The original is left untouched.
+ *  Returns the export path on success, null on failure. */
+export function exportClaudeSession(sourcePath: string, exportPath: string): string | null {
+  try {
+    if (!existsSync(sourcePath)) return null;
+    copyFileSync(sourcePath, exportPath);
+    return exportPath;
+  } catch {
+    return null;
+  }
 }

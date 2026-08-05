@@ -8,8 +8,8 @@
 // same path; a new capture creates a new file with a fresh timestamp + random
 // suffix so old captures remain readable.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
-import { join, basename } from 'path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
+import { dirname, join, basename } from 'path';
 import { randomBytes } from 'crypto';
 import { Session } from '../model/types';
 
@@ -115,6 +115,42 @@ export class PersistentLiveStore {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /** Update the in-place title of the session at `path`. File name is NOT
+   *  changed (we keep the path stable so open-session references still work).
+   *  Atomic write, same guarantee as `saveSessionAtPath`. Returns the new
+   *  title on success, or null if the file is missing/invalid/IO failed. */
+  renameSession(path: string, newTitle: string): string | null {
+    try {
+      if (!existsSync(path)) return null;
+      const text = readFileSync(path, 'utf-8');
+      const obj = JSON.parse(text);
+      if (!isValidSessionShape(obj)) return null;
+      const next: Session = { ...(obj as Session), title: newTitle };
+      this.saveSessionAtPath(next, path);
+      return newTitle;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Copy the session file at `path` to `exportPath` (an absolute path the
+   *  caller chose via a save dialog). The source file is left untouched.
+   *  Creates the parent directory if needed. Returns the export path on
+   *  success, null on failure. */
+  exportSession(path: string, exportPath: string): string | null {
+    try {
+      if (!existsSync(path)) return null;
+      const parent = dirname(exportPath);
+      if (parent && !existsSync(parent)) {
+        mkdirSync(parent, { recursive: true });
+      }
+      copyFileSync(path, exportPath);
+      return exportPath;
+    } catch {
+      return null;
     }
   }
 }

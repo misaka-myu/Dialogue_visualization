@@ -133,4 +133,58 @@ describe('PersistentLiveStore', () => {
     expect(loaded?.requests.length).toBe(1);
     expect(statSync(path).size).toBeGreaterThan(0);
   });
+
+  it('renameSession updates title in place without changing the path', () => {
+    const store = new PersistentLiveStore(tmpDir);
+    const path = store.saveSession(emptySession('r1', 1234));
+    const newTitle = store.renameSession(path, '我的新标题');
+    expect(newTitle).toBe('我的新标题');
+    // Path is unchanged so open-session references stay valid.
+    expect(existsSync(path)).toBe(true);
+    // The on-disk file reflects the new title.
+    const reloaded = store.loadSession(path);
+    expect(reloaded?.title).toBe('我的新标题');
+  });
+
+  it('renameSession returns null for missing file', () => {
+    const store = new PersistentLiveStore(tmpDir);
+    expect(store.renameSession(resolve(tmpDir, 'nope.json'), 'x')).toBeNull();
+  });
+
+  it('renameSession returns null for malformed JSON', () => {
+    const store = new PersistentLiveStore(tmpDir);
+    const path = resolve(tmpDir, 'bad.json');
+    require('fs').writeFileSync(path, '{ this is not json', 'utf-8');
+    expect(store.renameSession(path, 'x')).toBeNull();
+  });
+
+  it('exportSession copies the file to exportPath and leaves the source alone', () => {
+    const store = new PersistentLiveStore(tmpDir);
+    const src = store.saveSession(emptySession('ex1', 42));
+    const dest = resolve(tmpDir, 'exported', 'copy.json');
+    const result = store.exportSession(src, dest);
+    expect(result).toBe(dest);
+    expect(existsSync(dest)).toBe(true);
+    // Source still present.
+    expect(existsSync(src)).toBe(true);
+    // Destination content equals source.
+    const srcText = readFileSync(src, 'utf-8');
+    const destText = readFileSync(dest, 'utf-8');
+    expect(destText).toBe(srcText);
+  });
+
+  it('exportSession returns null for missing source', () => {
+    const store = new PersistentLiveStore(tmpDir);
+    const result = store.exportSession(resolve(tmpDir, 'gone.json'), resolve(tmpDir, 'out.json'));
+    expect(result).toBeNull();
+  });
+
+  it('exportSession creates parent directories on demand', () => {
+    const store = new PersistentLiveStore(tmpDir);
+    const src = store.saveSession(emptySession('ex2', 7));
+    const nested = resolve(tmpDir, 'a', 'b', 'c', 'out.json');
+    const result = store.exportSession(src, nested);
+    expect(result).toBe(nested);
+    expect(existsSync(nested)).toBe(true);
+  });
 });
