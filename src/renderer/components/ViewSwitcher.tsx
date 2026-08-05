@@ -17,8 +17,8 @@ export function ViewSwitcher() {
 
   const copyCmd = () => {
     if (!proxyStatus) return;
-    const cmd = `set ANTHROPIC_BASE_URL=http://localhost:${proxyStatus.port} && claude`;
-    navigator.clipboard?.writeText(cmd);
+    // settings.json already rewritten to point at our proxy; user just runs `claude`.
+    navigator.clipboard?.writeText('claude');
   };
 
   return (
@@ -42,9 +42,9 @@ export function ViewSwitcher() {
           <button
             onClick={copyCmd}
             style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(155,140,255,0.2)', border: '1px solid #444', color: 'inherit', fontSize: 11 }}
-            title="复制启动命令到剪贴板，在终端粘贴运行"
+            title="settings.json 已改写指向代理，在终端直接运行 claude 即可"
           >
-            📋 复制启动命令
+            📋 复制 claude 命令
           </button>
           <button
             onClick={() => stopCapture()}

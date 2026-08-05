@@ -18,8 +18,8 @@ export interface ProxyServer {
  * Start the proxy server. If `preferredPort` is already in use, tries
  * port+1, port+2, ... up to 20 attempts.
  */
-export async function startProxyServer(preferredPort: number): Promise<ProxyServer> {
-  const upstream = detectUpstream();
+export async function startProxyServer(preferredPort: number, upstreamOverride?: string): Promise<ProxyServer> {
+  const upstream = upstreamOverride ?? detectUpstream();
   const emitter = new EventEmitter();
   const app = express();
 
