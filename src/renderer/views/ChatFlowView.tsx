@@ -95,7 +95,11 @@ export function ChatFlowView() {
           >
             ⚙️ SYSTEM · {system.reduce((n, b) => n + (b.type === 'text' ? b.text.length : 0), 0)} 字 {systemOpen ? '▼' : '▶'}
           </button>
-          {systemOpen && system.map((b, i) => <Block key={i} block={b} />)}
+          {systemOpen && (
+            <div style={{ maxHeight: '40vh', overflow: 'auto', marginTop: 4, padding: '0 4px', borderBottom: '1px solid #333' }}>
+              {system.map((b, i) => <Block key={i} block={b} />)}
+            </div>
+          )}
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0 }}>
