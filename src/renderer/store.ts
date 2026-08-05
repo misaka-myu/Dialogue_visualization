@@ -22,12 +22,21 @@ interface State {
   currentView: ViewKind;
   loading: boolean;
   proxyStatus: { port: number; upstream: string } | null;
+  /** Right-side conversation directory panel visibility. Persisted in-memory
+   *  only — survives navigation, resets on app restart. */
+  directoryOpen: boolean;
+  /** Index of the message currently at the top of the chat viewport, used to
+   *  highlight the corresponding row in the conversation directory. null
+   *  means "no scroll position known yet" (e.g. just switched sessions). */
+  activeDirectoryIndex: number | null;
   setSessions: (s: SessionMeta[]) => void;
   setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
   setCurrentRequest: (r: ApiRequest | null) => void;
   setCurrentView: (v: ViewKind) => void;
   setLoading: (b: boolean) => void;
+  setDirectoryOpen: (open: boolean) => void;
+  setActiveDirectoryIndex: (i: number | null) => void;
   refreshSessions: () => Promise<void>;
   refreshLiveHistory: () => Promise<void>;
   openSession: (sourcePath: string) => Promise<void>;
@@ -65,6 +74,8 @@ export const useStore = create<State>((set, get) => ({
   currentView: 'chat-flow',
   loading: false,
   proxyStatus: null,
+  directoryOpen: true,
+  activeDirectoryIndex: null,
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
   setCurrentSession: (s) => {
@@ -77,6 +88,9 @@ export const useStore = create<State>((set, get) => ({
       // (e.g. starting a fresh capture); callers that DO open a specific
       // file should follow up by setting openSourcePath themselves.
       openSourcePath: s ? get().openSourcePath : null,
+      // Reset scroll-sync highlight so the directory doesn't briefly show a
+      // stale index while the new session's rangeChanged fires.
+      activeDirectoryIndex: null,
     });
   },
   setCurrentRequest: (r) => {
@@ -87,6 +101,8 @@ export const useStore = create<State>((set, get) => ({
   },
   setCurrentView: (v) => set({ currentView: v }),
   setLoading: (b) => set({ loading: b }),
+  setDirectoryOpen: (open) => set({ directoryOpen: open }),
+  setActiveDirectoryIndex: (i) => set({ activeDirectoryIndex: i }),
   refreshSessions: async () => {
     const sessions = await window.api.listSessions();
     set({ sessions });

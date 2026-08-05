@@ -1,13 +1,11 @@
 // src/renderer/views/ChatFlowView.tsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
 import { CodeViewer, languageFromPath } from '../components/CodeViewer';
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
+import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
+import { setVirtuosoRef } from '../hooks/virtuosoRef';
 
 function Block({ block, lang }: { block: ContentBlock; lang?: string }) {
   switch (block.type) {
@@ -53,15 +51,8 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
     system: { bg: 'rgba(255,183,77,0.08)', label: 'SYSTEM', icon: '⚙️' },
   };
   const c = colors[role] ?? colors.user;
-  const fullText = blocks.map((b) => {
-    if (b.type === 'text') return b.text;
-    if (b.type === 'thinking') return b.thinking;
-    if (b.type === 'tool_use') return b.name + ' ' + JSON.stringify(b.input);
-    if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-    return '';
-  }).join('');
-  const toks = meta?.outputTokens != null ? meta.outputTokens : estimateTokens(fullText);
-  const tokLabel = meta?.outputTokens != null ? `${toks} tok ✓` : `${toks} tok ≈`;
+  const tok = getMessageTokenInfo({ role: role as import('../../main/model/types').Role, content: blocks, meta });
+  const tokLabel = `${formatTokenCount(tok.count)} tok ${tok.real ? '✓' : '≈'}`;
   const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
   return (
     <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
@@ -104,6 +95,20 @@ export function ChatFlowView() {
     return m;
   }, [messages]);
 
+  const setActiveDirectoryIndex = useStore((s) => s.setActiveDirectoryIndex);
+
+  // Scroll-sync: when the visible range shifts, write the topmost index to
+  // the store so ConversationDirectory can highlight the matching row.
+  // Skipped while the directory is closed to avoid pointless renders.
+  const directoryOpen = useStore((s) => s.directoryOpen);
+  const onRangeChanged = useCallback(
+    (range: { startIndex: number; endIndex: number }) => {
+      if (!directoryOpen) return;
+      setActiveDirectoryIndex(range.startIndex);
+    },
+    [directoryOpen, setActiveDirectoryIndex],
+  );
+
   if (!session) {
     return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
   }
@@ -116,7 +121,7 @@ export function ChatFlowView() {
             onClick={() => setSystemOpen(!systemOpen)}
             style={{ padding: '4px 8px', background: 'rgba(255,183,77,0.08)', border: 'none', borderRadius: 4, cursor: 'pointer', color: 'inherit' }}
           >
-            ⚙️ SYSTEM · {estimateTokens(system.reduce((n, b) => n + (b.type === 'text' ? b.text : ''), ''))} tok {systemOpen ? '▼' : '▶'}
+            ⚙️ SYSTEM · {formatTokenCount(Math.ceil(system.reduce((n, b) => n + (b.type === 'text' ? b.text.length : 0), 0) / 4))} tok {systemOpen ? '▼' : '▶'}
           </button>
           {systemOpen && (
             <div style={{ maxHeight: '40vh', overflow: 'auto', marginTop: 4, padding: '8px 12px', background: 'rgba(255,183,77,0.08)', borderBottom: '1px solid #333', borderRadius: 4 }}>
@@ -127,6 +132,8 @@ export function ChatFlowView() {
       )}
       <div style={{ flex: 1, minHeight: 0 }}>
         <Virtuoso
+          ref={setVirtuosoRef}
+          rangeChanged={onRangeChanged}
           data={messages}
           itemContent={(index, m) => (
             <div style={{ padding: '0 12px' }}>
