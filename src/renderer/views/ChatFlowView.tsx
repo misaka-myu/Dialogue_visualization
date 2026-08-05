@@ -4,12 +4,6 @@ import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
 
 const MAX_RENDERED_MESSAGES = 200;
-const MAX_CONTENT_CHARS = 5000;
-
-function truncateText(text: string): string {
-  if (text.length <= MAX_CONTENT_CHARS) return text;
-  return text.slice(0, MAX_CONTENT_CHARS) + `… (截断，共 ${text.length} 字符)`;
-}
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -18,13 +12,13 @@ function estimateTokens(text: string): number {
 function Block({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case 'text':
-      return <div style={{ whiteSpace: 'pre-wrap' }}>{truncateText(block.text)}</div>;
+      return <div style={{ whiteSpace: 'pre-wrap' }}>{block.text}</div>;
     case 'tool_use':
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
           <span>🔧 <strong>tool_use: {block.name}</strong></span>
-          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto' }}>
-            {truncateText(JSON.stringify(block.input, null, 2))}
+          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(block.input, null, 2)}
           </pre>
         </div>
       );
@@ -33,16 +27,16 @@ function Block({ block }: { block: ContentBlock }) {
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(129,199,132,0.1)', borderLeft: '3px solid #81c784', borderRadius: '0 4px 4px 0', fontSize: 12 }}>
           <span style={{ color: '#81c784', fontWeight: 600 }}>📥 tool_result</span>
-          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto' }}>
-            {truncateText(raw)}
+          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {raw}
           </pre>
         </div>
       );
     }
     case 'thinking':
       return (
-        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(206,147,216,0.1)', borderRadius: 4, fontSize: 12, opacity: 0.7 }}>
-          💭 {truncateText(block.thinking)}
+        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(206,147,216,0.1)', borderRadius: 4, fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
+          💭 {block.thinking}
         </div>
       );
     default:
