@@ -5,6 +5,7 @@ import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { randomUUID } from 'crypto';
 import { ApiRequest, Session } from './model/types';
 import { startProxyServer, ProxyServer } from './proxy/server';
 import { PersistentLiveStore, LiveMeta, generateLiveFileName, LIVE_FILE_WARN_BYTES } from './store/persistent-store';
@@ -36,6 +37,28 @@ function readStoredUpstream(): string | null {
 
 function writeStoredUpstream(url: string): void {
   try { writeFileSync(storedUpstreamPath(), url); } catch { /* ignore */ }
+}
+
+/** Durable storage for the shared-secret used to authenticate capture
+ *  requests. Mirrors the durable-upstream pattern: persisted next to the
+ *  upstream file so we don't regenerate (and orphan old captures') keys on
+ *  every restart. */
+function storedSecretPath(): string {
+  return join(homedir(), '.claude', '.dialogueviz-secret');
+}
+
+function readStoredSecret(): string | null {
+  try {
+    if (existsSync(storedSecretPath())) {
+      const v = readFileSync(storedSecretPath(), 'utf-8').trim();
+      return v || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function writeStoredSecret(secret: string): void {
+  try { writeFileSync(storedSecretPath(), secret); } catch { /* ignore */ }
 }
 
 function isLocalhostUrl(u: string): boolean {
@@ -261,8 +284,11 @@ export function registerIpc(): void {
       }
       savedBaseUrl = upstream;
 
-      // Start proxy with the real upstream.
-      proxyServer = await startProxyServer(8787, upstream);
+      // Start proxy with the real upstream. Generate a fresh shared secret (or
+      // reuse the persisted one) so /v1/messages requires x-dialogueviz-key.
+      const secret = readStoredSecret() ?? randomUUID();
+      writeStoredSecret(secret);
+      proxyServer = await startProxyServer(8787, upstream, secret);
       proxyServer.onCaptured((apiRequest) => {
         // Stream to renderer.
         const windows = BrowserWindow.getAllWindows();
@@ -328,6 +354,9 @@ export function registerIpc(): void {
           } else {
             settings.env.ANTHROPIC_BASE_URL = savedBaseUrl;
           }
+          // Drop the proxy's shared-secret env var too — it has no use
+          // outside an active capture and shouldn't linger in settings.
+          delete settings.env.DIALOGUEVIZ_KEY;
           writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
         } catch (err) {
           console.error('[proxy] failed to restore settings.json:', err);

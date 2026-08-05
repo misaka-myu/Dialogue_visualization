@@ -17,8 +17,19 @@ export interface ProxyServer {
 /**
  * Start the proxy server. If `preferredPort` is already in use, tries
  * port+1, port+2, ... up to 20 attempts.
+ *
+ * If `expectedKey` is provided, /v1/messages requires the
+ * `x-dialogueviz-key` header to match. This is a *lightweight* local guard
+ * against other processes on the same machine injecting requests into the
+ * capture stream. It's NOT a real auth boundary — anyone with read access
+ * to `~/.claude/.dialogueviz-secret` can mint the header. The threat model
+ * is opportunistic same-host processes, not a determined attacker.
  */
-export async function startProxyServer(preferredPort: number, upstreamOverride?: string): Promise<ProxyServer> {
+export async function startProxyServer(
+  preferredPort: number,
+  upstreamOverride?: string,
+  expectedKey?: string,
+): Promise<ProxyServer> {
   const upstream = upstreamOverride ?? detectUpstream();
   const emitter = new EventEmitter();
   const app = express();
@@ -26,7 +37,22 @@ export async function startProxyServer(preferredPort: number, upstreamOverride?:
   // Parse all bodies as raw buffers so we can forward them byte-for-byte.
   app.use('/v1', express.raw({ type: '*/*', limit: '100mb' }));
 
-  app.post('/v1/messages', (req: express.Request, res: express.Response) => {
+  // Shared-secret check for the capture endpoint. Only enforced when the
+  // caller actually generated a key (i.e. we wrote one to settings.json).
+  // passthrough routes (count_tokens, models) stay open — they don't write
+  // anything to the capture.
+  const captureAuth = expectedKey
+    ? (req: express.Request, res: express.Response, next: express.NextFunction): void => {
+        const got = req.headers['x-dialogueviz-key'];
+        if (typeof got !== 'string' || got !== expectedKey) {
+          res.status(403).json({ error: 'forbidden: missing or invalid x-dialogueviz-key' });
+          return;
+        }
+        next();
+      }
+    : (_req: express.Request, _res: express.Response, next: express.NextFunction): void => next();
+
+  app.post('/v1/messages', captureAuth, (req: express.Request, res: express.Response) => {
     void handleMessages(req, res, upstream, emitter);
   });
 
@@ -77,6 +103,57 @@ function listenOnPort(app: express.Express, port: number): Promise<HttpServer> {
   });
 }
 
+/** Headers we never forward upstream. `host` would clobber the target host
+ *  on the way out; hop-by-hop / connection management headers (`connection`,
+ *  `keep-alive`, `te`, `trailers`, `transfer-encoding`, `upgrade`) must not
+ *  cross proxy boundaries; `content-length` is recomputed by fetch from the
+ *  body anyway. Client-IP hints (`x-forwarded-for`, `x-real-ip`,
+ *  `forwarded`, `x-forwarded-*`) would let upstream log our local client as
+ *  if it were a remote IP — strip them. `x-proxy-*` / `proxy-*` and any
+ *  custom key we use for the shared-secret scheme stay on this side. */
+const SKIPPED_REQUEST_HEADERS = new Set([
+  'host',
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailers',
+  'transfer-encoding',
+  'upgrade',
+  'content-length',
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-real-ip',
+  'x-client-ip',
+  'x-dialogueviz-key',
+]);
+
+function isProxyInternalHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (SKIPPED_REQUEST_HEADERS.has(lower)) return true;
+  if (lower.startsWith('proxy-')) return true;
+  if (lower.startsWith('x-proxy-')) return true;
+  return false;
+}
+
+/** Build a header bag safe to forward to the upstream API. Drops hop-by-hop
+ *  headers, proxy-internal headers (incl. our own shared-secret header),
+ *  and any client-IP forwarding hints that would mislead upstream logs. */
+function buildForwardHeaders(req: express.Request): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (isProxyInternalHeader(key)) continue;
+    if (typeof value === 'string') {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 /** Handle POST /v1/messages - the core capture endpoint. */
 async function handleMessages(
   req: express.Request,
@@ -96,14 +173,7 @@ async function handleMessages(
   const apiReq = normalizeAnthropicRequest(body, timestamp, genId());
   apiReq.inputMessages = normalizeMessages(body.messages);
 
-  // Build forwarded headers - copy everything except host (let fetch set it).
-  const forwardHeaders: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (key.toLowerCase() === 'host') continue;
-    if (typeof value === 'string') {
-      forwardHeaders[key] = value;
-    }
-  }
+  const forwardHeaders = buildForwardHeaders(req);
 
   const upstreamUrl = `${upstream}/v1/messages`;
   const isStream = body.stream === true;
@@ -146,6 +216,7 @@ async function streamAndCapture(
   }
 
   const rawChunks: Buffer[] = [];
+  let streamError: unknown = null;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -157,12 +228,22 @@ async function streamAndCapture(
         res.write(buf);
       }
     }
-  } catch {
-    // Stream error - end the response if not already ended.
+  } catch (err) {
+    streamError = err;
   } finally {
+    // Always release the reader so the underlying socket isn't leaked,
+    // even on read errors / mid-stream aborts. releaseLock is safe to call
+    // multiple times only because the WHATWG spec says subsequent calls
+    // are no-ops — wrap defensively anyway.
+    try { reader.releaseLock(); } catch { /* ignore */ }
     if (!res.writableEnded) {
-      res.end();
+      try { res.end(); } catch { /* ignore */ }
     }
+  }
+
+  if (streamError) {
+    console.error('[proxy] stream read error:', streamError);
+    return;
   }
 
   // After stream completes, decode and accumulate SSE events.
@@ -206,13 +287,7 @@ async function passthrough(
   res: express.Response,
   upstream: string,
 ): Promise<void> {
-  const forwardHeaders: Record<string, string> = {};
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (key.toLowerCase() === 'host') continue;
-    if (typeof value === 'string') {
-      forwardHeaders[key] = value;
-    }
-  }
+  const forwardHeaders = buildForwardHeaders(req);
 
   const path = req.originalUrl;
   const upstreamUrl = `${upstream}${path}`;

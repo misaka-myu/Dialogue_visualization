@@ -29,6 +29,9 @@ interface State {
    *  highlight the corresponding row in the conversation directory. null
    *  means "no scroll position known yet" (e.g. just switched sessions). */
   activeDirectoryIndex: number | null;
+  /** Transient status banner message. The Toast component auto-clears it
+   *  after a short delay so callers can fire-and-forget. */
+  toast: string | null;
   setSessions: (s: SessionMeta[]) => void;
   setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
@@ -37,6 +40,7 @@ interface State {
   setLoading: (b: boolean) => void;
   setDirectoryOpen: (open: boolean) => void;
   setActiveDirectoryIndex: (i: number | null) => void;
+  setToast: (message: string | null) => void;
   refreshSessions: () => Promise<void>;
   refreshLiveHistory: () => Promise<void>;
   openSession: (sourcePath: string) => Promise<void>;
@@ -76,6 +80,7 @@ export const useStore = create<State>((set, get) => ({
   proxyStatus: null,
   directoryOpen: true,
   activeDirectoryIndex: null,
+  toast: null,
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
   setCurrentSession: (s) => {
@@ -103,6 +108,7 @@ export const useStore = create<State>((set, get) => ({
   setLoading: (b) => set({ loading: b }),
   setDirectoryOpen: (open) => set({ directoryOpen: open }),
   setActiveDirectoryIndex: (i) => set({ activeDirectoryIndex: i }),
+  setToast: (message) => set({ toast: message }),
   refreshSessions: async () => {
     const sessions = await window.api.listSessions();
     set({ sessions });

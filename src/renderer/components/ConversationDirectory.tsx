@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
-import { toPlainText, toCopyJSON, copyToClipboard } from '../utils/messageCopy';
+import { copyMessageText, copyMessageJson } from '../utils/messageCopy';
 import { getVirtuosoRef } from '../hooks/virtuosoRef';
 import type { Message } from '../../main/model/types';
 
@@ -140,14 +140,12 @@ function Row({ message, index, active }: { message: Message; index: number; acti
     v?.scrollToIndex({ index, align: 'start', behavior: 'smooth' });
   }, [index]);
 
-  const copyText = useCallback(async () => {
-    const ok = await copyToClipboard(toPlainText(message.content), '文本');
-    if (ok) window.alert('已复制文本到剪贴板。');
-  }, [message.content]);
+  const copyText = useCallback(() => {
+    void copyMessageText(message);
+  }, [message]);
 
-  const copyJson = useCallback(async () => {
-    const ok = await copyToClipboard(toCopyJSON(message), 'JSON');
-    if (ok) window.alert('已复制 JSON 到剪贴板。');
+  const copyJson = useCallback(() => {
+    void copyMessageJson(message);
   }, [message]);
 
   return (
