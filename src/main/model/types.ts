@@ -71,6 +71,8 @@ export interface ApiRequest {
   metadata?: Record<string, unknown>;
   response?: ApiResponse;
   transformMode?: boolean;
+  /** For proxy-live captures: the full input messages of this request. */
+  inputMessages?: Message[];
 }
 
 export interface Session {

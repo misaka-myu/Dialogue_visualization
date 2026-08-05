@@ -3,7 +3,7 @@ import express from 'express';
 import { Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { ApiRequest } from '../model/types';
-import { normalizeAnthropicRequest, normalizeAnthropicResponse } from '../model/normalizer';
+import { normalizeAnthropicRequest, normalizeAnthropicResponse, normalizeMessages } from '../model/normalizer';
 import { detectUpstream } from './upstream';
 import { accumulateClaudeSse } from './sse';
 
@@ -94,6 +94,7 @@ async function handleMessages(
 
   const timestamp = Date.now();
   const apiReq = normalizeAnthropicRequest(body, timestamp, genId());
+  apiReq.inputMessages = normalizeMessages(body.messages);
 
   // Build forwarded headers - copy everything except host (let fetch set it).
   const forwardHeaders: Record<string, string> = {};

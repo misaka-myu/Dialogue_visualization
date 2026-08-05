@@ -5,6 +5,9 @@ export function ViewSwitcher() {
   const currentView = useStore((s) => s.currentView);
   const setCurrentView = useStore((s) => s.setCurrentView);
   const currentSession = useStore((s) => s.currentSession);
+  const proxyStatus = useStore((s) => s.proxyStatus);
+  const startCapture = useStore((s) => s.startCapture);
+  const stopCapture = useStore((s) => s.stopCapture);
 
   const views: { kind: ViewKind; label: string }[] = [
     { kind: 'chat-flow', label: '对话流' },
@@ -27,6 +30,24 @@ export function ViewSwitcher() {
           {v.label}
         </button>
       ))}
+      {proxyStatus ? (
+        <>
+          <span style={{ fontSize: 11, color: '#81c784' }}>● 捕获中 :{proxyStatus.port} → {proxyStatus.upstream}</span>
+          <button
+            onClick={() => stopCapture()}
+            style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(239,83,80,0.2)', border: '1px solid #444', color: 'inherit' }}
+          >
+            ⏹ 停止
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => startCapture()}
+          style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(129,199,132,0.2)', border: '1px solid #444', color: 'inherit' }}
+        >
+          🔴 开始捕获
+        </button>
+      )}
       {currentSession && (
         <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.6 }}>
           {currentSession.requests.length} 请求 · {currentSession.conversation.length} 条对话

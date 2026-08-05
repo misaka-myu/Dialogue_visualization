@@ -58,8 +58,10 @@ export function registerIpc(): void {
       ANTHROPIC_BASE_URL: `http://localhost:${port}`,
     };
     try {
-      // On Windows, `claude` is typically claude.cmd; shell:true lets us find it.
-      const child = spawn('claude', { stdio: 'inherit', shell: true, env });
+      // Open a new console window running `claude` so the user can interact with it.
+      // The new window inherits `env` (carrying ANTHROPIC_BASE_URL).
+      // On Windows: `start "title" cmd /k claude` opens a persistent cmd window.
+      const child = spawn('cmd', ['/c', 'start', 'DialogueViz-Capture', 'cmd', '/k', 'claude'], { env, shell: false });
       return { pid: child.pid ?? -1 };
     } catch (err) {
       console.error('[proxy] failed to launch claude:', err);
