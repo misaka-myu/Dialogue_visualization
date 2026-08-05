@@ -8,6 +8,8 @@ export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log';
 interface State {
   sessions: SessionMeta[];
   currentSession: Session | null;
+  /** Saved live capture session so user can return to it after browsing scanned sessions. */
+  liveSession: Session | null;
   currentRequest: ApiRequest | null;
   currentRequestMessages: Message[];
   currentView: ViewKind;
@@ -22,6 +24,7 @@ interface State {
   openSession: (sourcePath: string) => Promise<void>;
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
+  goToLive: () => void;
 }
 
 function deriveMessages(session: Session | null, request: ApiRequest | null): Message[] {
@@ -32,6 +35,7 @@ function deriveMessages(session: Session | null, request: ApiRequest | null): Me
 export const useStore = create<State>((set, get) => ({
   sessions: [],
   currentSession: null,
+  liveSession: null,
   currentRequest: null,
   currentRequestMessages: [],
   currentView: 'chat-flow',
@@ -81,6 +85,7 @@ export const useStore = create<State>((set, get) => ({
       conversation: [],
     };
     get().setCurrentSession(live);
+    set({ liveSession: live });
     window.api.onLiveUpdate((req) => {
       const s = get().currentSession;
       if (!s || s.source !== 'proxy-live') return;
@@ -89,14 +94,20 @@ export const useStore = create<State>((set, get) => ({
       if (req.inputMessages) {
         conversation = [...req.inputMessages];
         if (req.response) {
-          conversation = [...conversation, { role: 'assistant', content: req.response.content, meta: { outputTokens: req.response.usage.outputTokens || undefined, model: req.response.usage.model } }];
+          const u = req.response.usage;
+          conversation = [...conversation, { role: 'assistant', content: req.response.content, meta: { outputTokens: u?.outputTokens || undefined, model: req.response.usage.model } }];
         }
       }
-      set({ currentSession: { ...s, requests, conversation } });
+      const next = { ...s, requests, conversation };
+      set({ currentSession: next, liveSession: next });
     });
   },
   stopCapture: async () => {
     await window.api.stopProxy();
     set({ proxyStatus: null });
+  },
+  goToLive: () => {
+    const live = get().liveSession;
+    if (live) get().setCurrentSession(live);
   },
 }));
