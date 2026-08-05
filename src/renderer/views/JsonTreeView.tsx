@@ -22,7 +22,7 @@ interface NodeProps {
   depth: number;
 }
 
-function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
+export function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
   const [localOpen, setLocalOpen] = useState(depth < DEFAULT_OPEN_DEPTH);
   const open = forceOpen || localOpen;
 

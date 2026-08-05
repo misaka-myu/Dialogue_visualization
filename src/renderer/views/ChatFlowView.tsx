@@ -50,7 +50,7 @@ function Block({ block }: { block: ContentBlock }) {
   }
 }
 
-function Message({ role, blocks }: { role: string; blocks: ContentBlock[] }) {
+function Message({ role, blocks, meta }: { role: string; blocks: ContentBlock[]; meta?: import('../../main/model/types').MessageMeta }) {
   const colors: Record<string, { bg: string; label: string; icon: string }> = {
     user: { bg: 'rgba(144,202,250,0.1)', label: 'USER', icon: '👤' },
     assistant: { bg: 'rgba(155,140,255,0.1)', label: 'ASSISTANT', icon: '🤖' },
@@ -60,9 +60,17 @@ function Message({ role, blocks }: { role: string; blocks: ContentBlock[] }) {
   const c = colors[role] ?? colors.user;
   const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
   const toks = estimateTokens(text);
+  const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
   return (
-    <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6 }}>
-      <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>{c.icon} {c.label} · {toks} tok</div>
+    <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
+      <div style={{ fontSize: 10, fontWeight: 600, opacity: 0.7, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span>{c.icon} {c.label} · {toks} tok</span>
+        {meta?.model && <span style={{ color: '#ffb74d' }}>🤖 {meta.model}</span>}
+        {meta?.effort && <span style={{ opacity: 0.6 }}>effort: {meta.effort}</span>}
+        {meta?.isSidechain && <span style={{ color: '#ff8a65' }}>↳ 侧链</span>}
+        {ts && <span style={{ opacity: 0.5 }}>{ts}</span>}
+        {meta?.gitBranch && <span style={{ opacity: 0.5 }}>🌿 {meta.gitBranch}</span>}
+      </div>
       {blocks.map((b, i) => <Block key={i} block={b} />)}
     </div>
   );
@@ -100,7 +108,7 @@ export function ChatFlowView() {
         </div>
       )}
       {capped.map((m, i) => (
-        <Message key={i} role={m.role} blocks={m.content} />
+        <Message key={i} role={m.role} blocks={m.content} meta={m.meta} />
       ))}
     </div>
   );

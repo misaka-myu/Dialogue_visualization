@@ -1,7 +1,7 @@
 // src/main/adapters/claude-log.ts
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
-import { Session, ApiRequest, Message, emptyUsage } from '../model/types';
+import { Session, ApiRequest, Message, MessageMeta } from '../model/types';
 import { normalizeContent } from '../model/normalizer';
 
 const TITLE_MAX_CHARS = 80;
@@ -133,10 +133,20 @@ interface JsonlLine {
   type?: string;
   message?: { role?: string; content?: unknown; usage?: Record<string, unknown>; model?: string; id?: string };
   sessionId?: string;
+  session_id?: string;
   cwd?: string;
   timestamp?: string;
   isMeta?: boolean;
   customTitle?: string;
+  parentUuid?: string;
+  uuid?: string;
+  isSidechain?: boolean;
+  effort?: string;
+  gitBranch?: string;
+  version?: string;
+  userType?: string;
+  entrypoint?: string;
+  promptId?: string;
 }
 
 interface ConvoMessage {
@@ -146,6 +156,7 @@ interface ConvoMessage {
   usage?: Record<string, unknown>;
   model?: string;
   messageId?: string;
+  meta: MessageMeta;
 }
 
 export function loadClaudeSession(path: string): Session {
@@ -153,6 +164,7 @@ export function loadClaudeSession(path: string): Session {
   const lines = text.split('\n').filter((l) => l.trim().length > 0);
 
   const convo: ConvoMessage[] = [];
+  const rawLines: unknown[] = [];
   let sessionId: string | undefined;
   let cwd: string | undefined;
   let firstTs: number | undefined;
@@ -161,6 +173,7 @@ export function loadClaudeSession(path: string): Session {
   for (const line of lines) {
     let obj: JsonlLine;
     try { obj = JSON.parse(line); } catch { continue; }
+    rawLines.push(obj);
     if (obj.isMeta) continue;
     if (obj.sessionId) sessionId = obj.sessionId;
     if (obj.cwd) cwd = obj.cwd;
@@ -177,7 +190,23 @@ export function loadClaudeSession(path: string): Session {
     if (role === 'user' && content.every((b) => b.type === 'tool_result')) {
       role = 'tool';
     }
-    convo.push({ role, content, ts, usage: msg.usage, model: msg.model, messageId: msg.id });
+    convo.push({
+      role, content, ts, usage: msg.usage, model: msg.model, messageId: msg.id,
+      meta: {
+        timestamp: ts,
+        uuid: obj.uuid,
+        parentUuid: obj.parentUuid,
+        isSidechain: obj.isSidechain,
+        effort: obj.effort,
+        cwd: obj.cwd,
+        gitBranch: obj.gitBranch,
+        version: obj.version,
+        userType: obj.userType,
+        entrypoint: obj.entrypoint,
+        promptId: obj.promptId,
+        model: msg.model,
+      },
+    });
   }
 
   const conversation: Message[] = [];
@@ -206,9 +235,9 @@ export function loadClaudeSession(path: string): Session {
           },
         },
       });
-      conversation.push({ role: 'assistant', content: m.content });
+      conversation.push({ role: 'assistant', content: m.content, meta: m.meta });
     } else {
-      conversation.push({ role: m.role, content: m.content });
+      conversation.push({ role: m.role, content: m.content, meta: m.meta });
     }
   }
 
@@ -223,5 +252,6 @@ export function loadClaudeSession(path: string): Session {
     projectDir: cwd ?? meta?.projectDir,
     requests,
     conversation,
+    rawLines,
   };
 }

@@ -9,6 +9,7 @@ export function ViewSwitcher() {
   const views: { kind: ViewKind; label: string }[] = [
     { kind: 'chat-flow', label: '对话流' },
     { kind: 'json-tree', label: 'JSON 树' },
+    { kind: 'raw-log', label: '原始日志' },
   ];
 
   return (

@@ -41,8 +41,8 @@ describe('loadClaudeSession', () => {
 
     // conversation 扁平数组，3 条消息（user + 2 assistant）
     expect(session.conversation).toHaveLength(3);
-    expect(session.conversation[0]).toEqual({ role: 'user', content: [{ type: 'text', text: '帮我修 bug' }] });
-    expect(session.conversation[1]).toEqual({ role: 'assistant', content: [{ type: 'text', text: '我来看看' }] });
+    expect(session.conversation[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: '帮我修 bug' }] });
+    expect(session.conversation[1]).toMatchObject({ role: 'assistant', content: [{ type: 'text', text: '我来看看' }] });
 
     // 第 1 个请求：messageCount = 1（conversation 前 1 条 = [user]），response = "我来看看"
     expect(session.requests[0].messageCount).toBe(1);
