@@ -59,7 +59,7 @@ export function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
   const capped = !showAll && allEntries.length > MAX_ARRAY_CHILDREN ? allEntries.slice(0, MAX_ARRAY_CHILDREN) : allEntries;
   const overflow = allEntries.length - capped.length;
 
-  const blockType = typeof value === 'object' && value !== null && 'type' in (value as any) ? (value as any).type : undefined;
+  const blockType = typeof value === 'object' && value !== null && typeof (value as any).type === 'string' ? (value as any).type : undefined;
 
   return (
     <div>
