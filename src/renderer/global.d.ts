@@ -5,6 +5,10 @@ import { Session, ApiRequest } from '../main/model/types';
 export interface ApiBinding {
   listSessions: () => Promise<SessionMeta[]>;
   loadSession: (sourcePath: string) => Promise<Session | null>;
+  startProxy: () => Promise<{ port: number; upstream: string } | null>;
+  stopProxy: () => Promise<void>;
+  launchClaude: (port: number) => Promise<{ pid: number } | null>;
+  onLiveUpdate: (cb: (req: ApiRequest) => void) => void;
 }
 
 declare global {
