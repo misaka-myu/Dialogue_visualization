@@ -1,9 +1,8 @@
 // src/renderer/views/ChatFlowView.tsx
 import { useState } from 'react';
+import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
-
-const MAX_RENDERED_MESSAGES = 200;
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -86,13 +85,10 @@ export function ChatFlowView() {
     return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
   }
 
-  const capped = messages.slice(0, MAX_RENDERED_MESSAGES);
-  const overflow = messages.length - capped.length;
-
   return (
-    <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {system.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
+        <div style={{ padding: '6px 12px 0' }}>
           <button
             onClick={() => setSystemOpen(!systemOpen)}
             style={{ padding: '4px 8px', background: 'rgba(255,183,77,0.08)', border: 'none', borderRadius: 4, cursor: 'pointer', color: 'inherit' }}
@@ -102,14 +98,17 @@ export function ChatFlowView() {
           {systemOpen && system.map((b, i) => <Block key={i} block={b} />)}
         </div>
       )}
-      {overflow > 0 && (
-        <div style={{ padding: '4px 8px', marginBottom: 6, fontSize: 11, opacity: 0.6, background: 'rgba(255,183,77,0.06)', borderRadius: 4 }}>
-          显示前 {MAX_RENDERED_MESSAGES} 条，共 {messages.length} 条
-        </div>
-      )}
-      {capped.map((m, i) => (
-        <Message key={i} role={m.role} blocks={m.content} meta={m.meta} />
-      ))}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Virtuoso
+          data={messages}
+          itemContent={(index, m) => (
+            <div style={{ padding: '0 12px' }}>
+              <Message role={m.role} blocks={m.content} meta={m.meta} />
+            </div>
+          )}
+          style={{ height: '100%' }}
+        />
+      </div>
     </div>
   );
 }
