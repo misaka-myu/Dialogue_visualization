@@ -2,11 +2,14 @@
 import { create } from 'zustand';
 import { Session, ApiRequest, Message } from '../main/model/types';
 import { SessionMeta } from '../main/adapters/claude-log';
+import { LiveMeta } from '../main/store/persistent-store';
 
 export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log';
 
 interface State {
   sessions: SessionMeta[];
+  /** Past proxy-live captures, newest first. */
+  liveHistory: LiveMeta[];
   currentSession: Session | null;
   /** Saved live capture session so user can return to it after browsing scanned sessions. */
   liveSession: Session | null;
@@ -16,12 +19,15 @@ interface State {
   loading: boolean;
   proxyStatus: { port: number; upstream: string } | null;
   setSessions: (s: SessionMeta[]) => void;
+  setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
   setCurrentRequest: (r: ApiRequest | null) => void;
   setCurrentView: (v: ViewKind) => void;
   setLoading: (b: boolean) => void;
   refreshSessions: () => Promise<void>;
+  refreshLiveHistory: () => Promise<void>;
   openSession: (sourcePath: string) => Promise<void>;
+  openLive: (path: string) => Promise<void>;
   startCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
   goToLive: () => void;
@@ -34,6 +40,7 @@ function deriveMessages(session: Session | null, request: ApiRequest | null): Me
 
 export const useStore = create<State>((set, get) => ({
   sessions: [],
+  liveHistory: [],
   currentSession: null,
   liveSession: null,
   currentRequest: null,
@@ -42,6 +49,7 @@ export const useStore = create<State>((set, get) => ({
   loading: false,
   proxyStatus: null,
   setSessions: (s) => set({ sessions: s }),
+  setLiveHistory: (l) => set({ liveHistory: l }),
   setCurrentSession: (s) => {
     const req = s?.requests[0] ?? null;
     set({
@@ -62,10 +70,28 @@ export const useStore = create<State>((set, get) => ({
     const sessions = await window.api.listSessions();
     set({ sessions });
   },
+  refreshLiveHistory: async () => {
+    try {
+      const liveHistory = await window.api.listLive();
+      set({ liveHistory });
+    } catch {
+      // Live history is a convenience feature; never block the UI on it.
+    }
+  },
   openSession: async (sourcePath) => {
     set({ loading: true });
     try {
       const session = await window.api.loadSession(sourcePath);
+      get().setCurrentSession(session);
+    } finally {
+      set({ loading: false });
+    }
+  },
+  openLive: async (path) => {
+    set({ loading: true });
+    try {
+      const session = await window.api.loadLive(path);
+      if (!session) return;
       get().setCurrentSession(session);
     } finally {
       set({ loading: false });
@@ -101,10 +127,14 @@ export const useStore = create<State>((set, get) => ({
       const next = { ...s, requests, conversation };
       set({ currentSession: next, liveSession: next });
     });
+    // Refresh the history list so the new capture shows up in the sidebar.
+    get().refreshLiveHistory();
   },
   stopCapture: async () => {
     await window.api.stopProxy();
     set({ proxyStatus: null });
+    // Capture may have grown; refresh history so the file's metadata is fresh.
+    get().refreshLiveHistory();
   },
   goToLive: () => {
     const live = get().liveSession;

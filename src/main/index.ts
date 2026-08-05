@@ -1,7 +1,7 @@
 // src/main/index.ts
 import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
-import { registerIpc } from './ipc';
+import { registerIpc, installLiveStoreQuitHook } from './ipc';
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -21,6 +21,7 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  installLiveStoreQuitHook();
   registerIpc();
   createWindow();
   app.on('activate', () => {

@@ -1,12 +1,13 @@
 // src/main/ipc.ts
-import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { ipcMain, dialog, BrowserWindow, app } from 'electron';
 import { scanClaudeSessions, loadClaudeSession, SessionMeta } from './adapters/claude-log';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { Session } from './model/types';
+import { ApiRequest, Session } from './model/types';
 import { startProxyServer, ProxyServer } from './proxy/server';
+import { PersistentLiveStore, LiveMeta, generateLiveFileName, LIVE_FILE_WARN_BYTES } from './store/persistent-store';
 
 function claudeProjectsDir(): string {
   return join(homedir(), '.claude', 'projects');
@@ -44,6 +45,87 @@ function isLocalhostUrl(u: string): boolean {
 let proxyServer: ProxyServer | null = null;
 let savedBaseUrl: string | undefined | null = null;  // null = not captured yet; undefined = key absent
 
+// --- Live-capture persistence state (module scope; single capture at a time) ---
+let liveStore: PersistentLiveStore | null = null;
+interface LiveRuntime {
+  session: Session;
+  /** Absolute file path the session is being persisted to (stable for the
+   *  duration of a capture so successive saves overwrite the same file). */
+  path: string;
+  /** Trailing-edge debounce timer for batched writes. */
+  saveTimer: NodeJS.Timeout | null;
+  /** Last known file size in bytes — used to warn when a file grows large. */
+  lastSize: number;
+}
+let liveRuntime: LiveRuntime | null = null;
+const SAVE_DEBOUNCE_MS = 500;
+
+function ensureLiveStore(): PersistentLiveStore {
+  if (!liveStore) liveStore = new PersistentLiveStore(claudeProjectsDir());
+  return liveStore;
+}
+
+/** Apply `req` to the in-memory live session, then schedule a debounced save. */
+function pushCapturedRequest(req: ApiRequest): void {
+  const rt = liveRuntime;
+  if (!rt) return;
+  const requests = [...rt.session.requests, req];
+  let conversation = rt.session.conversation;
+  if (req.inputMessages && req.inputMessages.length > 0) {
+    conversation = [...req.inputMessages];
+    if (req.response) {
+      const u = req.response.usage;
+      conversation = [
+        ...conversation,
+        {
+          role: 'assistant',
+          content: req.response.content,
+          meta: {
+            outputTokens: u?.outputTokens || undefined,
+            model: u?.model,
+          },
+        },
+      ];
+    }
+  }
+  rt.session = { ...rt.session, requests, conversation };
+  scheduleLiveSave();
+}
+
+function scheduleLiveSave(): void {
+  const rt = liveRuntime;
+  if (!rt) return;
+  if (rt.saveTimer) clearTimeout(rt.saveTimer);
+  rt.saveTimer = setTimeout(() => {
+    rt.saveTimer = null;
+    flushLiveSave();
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/** Write the current live session to disk synchronously. Safe to call from
+ *  before-quit: clear any pending debounce first so we don't race the timer. */
+function flushLiveSave(): void {
+  const rt = liveRuntime;
+  if (!rt) return;
+  if (rt.saveTimer) {
+    clearTimeout(rt.saveTimer);
+    rt.saveTimer = null;
+  }
+  try {
+    const store = ensureLiveStore();
+    store.saveSessionAtPath(rt.session, rt.path);
+    try {
+      const { statSync } = require('fs') as typeof import('fs');
+      rt.lastSize = statSync(rt.path).size;
+      if (rt.lastSize > LIVE_FILE_WARN_BYTES) {
+        console.warn(`[live-store] file ${rt.path} is ${rt.lastSize} bytes (>${LIVE_FILE_WARN_BYTES}); consider rotating.`);
+      }
+    } catch { /* size probe is best-effort */ }
+  } catch (err) {
+    console.error('[live-store] save failed:', err);
+  }
+}
+
 export function registerIpc(): void {
   ipcMain.handle('sessions:list', async (): Promise<SessionMeta[]> => {
     return scanClaudeSessions(claudeProjectsDir());
@@ -57,6 +139,38 @@ export function registerIpc(): void {
     }
   });
 
+  // --- Live capture history IPC ---
+  ipcMain.handle('live:list', async (): Promise<LiveMeta[]> => {
+    try {
+      return ensureLiveStore().listSessions();
+    } catch (err) {
+      console.error('[live-store] list failed:', err);
+      return [];
+    }
+  });
+
+  ipcMain.handle('live:load', async (_e, path: string): Promise<Session | null> => {
+    return ensureLiveStore().loadSession(path);
+  });
+
+  ipcMain.handle('live:save', async (_e, session: Session): Promise<string> => {
+    const store = ensureLiveStore();
+    // Overwrite the current capture's file if one is active for this session.
+    if (liveRuntime && liveRuntime.session.id === session.id) {
+      const next: Session = { ...session, endedAt: session.endedAt ?? Date.now() };
+      liveRuntime.session = next;
+      store.saveSessionAtPath(next, liveRuntime.path);
+      return liveRuntime.path;
+    }
+    // Otherwise treat as a new save with a fresh path.
+    return store.saveSession(session);
+  });
+
+  ipcMain.handle('live:delete', async (_e, path: string): Promise<boolean> => {
+    return ensureLiveStore().deleteSession(path);
+  });
+
+  // --- Proxy lifecycle ---
   ipcMain.handle('proxy:start', async (): Promise<{ port: number; upstream: string } | null> => {
     if (proxyServer) {
       return { port: proxyServer.port, upstream: proxyServer.upstream };
@@ -94,11 +208,35 @@ export function registerIpc(): void {
       // Start proxy with the real upstream.
       proxyServer = await startProxyServer(8787, upstream);
       proxyServer.onCaptured((apiRequest) => {
+        // Stream to renderer.
         const windows = BrowserWindow.getAllWindows();
         if (windows.length > 0) {
           windows[0].webContents.send('proxy:live-update', apiRequest);
         }
+        // Persist to disk (debounced).
+        pushCapturedRequest(apiRequest);
       });
+
+      // Allocate a file path for this capture session BEFORE the first
+      // request arrives, so every captured request overwrites the same file.
+      const store = ensureLiveStore();
+      const now = Date.now();
+      const liveSession: Session = {
+        id: `proxy-live-${now}`,
+        source: 'proxy-live',
+        client: 'claude-code',
+        startedAt: now,
+        title: `实时捕获 (port ${proxyServer.port})`,
+        requests: [],
+        conversation: [],
+      };
+      const path = join(claudeProjectsDir(), generateLiveFileName(now));
+      liveRuntime = { session: liveSession, path, saveTimer: null, lastSize: 0 };
+      // Write the empty initial session so the file is visible in history
+      // even if the user kills the app before any request lands.
+      try { store.saveSessionAtPath(liveSession, path); } catch (err) {
+        console.error('[live-store] initial save failed:', err);
+      }
 
       // Rewrite settings.json to point claude at our proxy.
       const proxyUrl = `http://localhost:${proxyServer.port}`;
@@ -141,6 +279,12 @@ export function registerIpc(): void {
       }
       savedBaseUrl = null;
     }
+    // Final flush of the live capture so the on-disk file reflects the full
+    // session, including `endedAt`.
+    if (liveRuntime) {
+      liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
+      flushLiveSave();
+    }
   });
 
   ipcMain.handle('proxy:launch-claude', async (_e, port: number): Promise<{ pid: number } | null> => {
@@ -158,5 +302,24 @@ export function registerIpc(): void {
       console.error('[proxy] failed to launch claude:', err);
       return null;
     }
+  });
+}
+
+/** Best-effort flush called when the app is about to quit, so an in-flight
+ *  capture isn't lost if the user closes the app without stopping first. */
+export function flushPendingLiveSession(): void {
+  if (liveRuntime) {
+    liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
+    flushLiveSave();
+  }
+}
+
+// Auto-register the quit hook so we never lose a capture to a hard close.
+let quitHookInstalled = false;
+export function installLiveStoreQuitHook(): void {
+  if (quitHookInstalled) return;
+  quitHookInstalled = true;
+  app.on('before-quit', () => {
+    flushPendingLiveSession();
   });
 }

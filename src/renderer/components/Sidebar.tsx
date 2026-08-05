@@ -2,17 +2,33 @@
 import { useEffect } from 'react';
 import { useStore } from '../store';
 
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function Sidebar() {
   const sessions = useStore((s) => s.sessions);
+  const liveHistory = useStore((s) => s.liveHistory);
   const refreshSessions = useStore((s) => s.refreshSessions);
+  const refreshLiveHistory = useStore((s) => s.refreshLiveHistory);
   const openSession = useStore((s) => s.openSession);
+  const openLive = useStore((s) => s.openLive);
   const currentSession = useStore((s) => s.currentSession);
   const proxyStatus = useStore((s) => s.proxyStatus);
   const setCurrentSession = useStore((s) => s.setCurrentSession);
 
   useEffect(() => {
     refreshSessions();
-  }, [refreshSessions]);
+    refreshLiveHistory();
+  }, [refreshSessions, refreshLiveHistory]);
+
+  // A loaded-from-history session is identified by the file path; live capture
+  // uses the in-memory id. Compare on the path when available.
+  const currentSourcePath = currentSession && 'sourcePath' in currentSession
+    ? (currentSession as unknown as { sourcePath?: string }).sourcePath
+    : undefined;
 
   return (
     <div style={{ width: 240, borderRight: '1px solid #333', padding: 8, overflowY: 'auto' }}>
@@ -39,7 +55,26 @@ export function Sidebar() {
           </button>
         </>
       )}
-      <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8 }}>Claude Code 会话</div>
+      <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#9b8cff' }}>● 历史捕获</div>
+      {liveHistory.length === 0 && (
+        <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>暂无历史</div>
+      )}
+      {liveHistory.map((m) => (
+        <button
+          key={m.path}
+          onClick={() => openLive(m.path)}
+          style={{
+            display: 'block', width: '100%', textAlign: 'left',
+            padding: 6, marginBottom: 4, borderRadius: 4, cursor: 'pointer',
+            background: currentSourcePath === m.path ? 'rgba(155,140,255,0.2)' : 'transparent',
+            border: 'none', color: 'inherit',
+          }}
+        >
+          <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
+          <div style={{ fontSize: 10, opacity: 0.5 }}>{m.requestCount} 请求 · {formatTime(m.startedAt)} · {m.sizeKB}KB</div>
+        </button>
+      ))}
+      <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, marginTop: 4 }}>Claude Code 会话</div>
       {sessions.length === 0 && (
         <div style={{ fontSize: 12, opacity: 0.5 }}>未找到会话</div>
       )}
