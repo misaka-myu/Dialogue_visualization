@@ -1,6 +1,6 @@
 {
   "name": "dialogue-viz",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Visualize the request data Claude Code/Codex send to LLM APIs",
   "author": "misaka_myu",
   "license": "GPL-3.0-or-later",
