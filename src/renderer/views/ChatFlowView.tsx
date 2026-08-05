@@ -115,7 +115,7 @@ export function ChatFlowView() {
             onClick={() => setSystemOpen(!systemOpen)}
             style={{ padding: '4px 8px', background: 'rgba(255,183,77,0.08)', border: 'none', borderRadius: 4, cursor: 'pointer', color: 'inherit' }}
           >
-            ⚙️ SYSTEM · {system.reduce((n, b) => n + (b.type === 'text' ? b.text.length : 0), 0)} 字 {systemOpen ? '▼' : '▶'}
+            ⚙️ SYSTEM · {estimateTokens(system.reduce((n, b) => n + (b.type === 'text' ? b.text : ''), ''))} tok {systemOpen ? '▼' : '▶'}
           </button>
           {systemOpen && (
             <div style={{ maxHeight: '40vh', overflow: 'auto', marginTop: 4, padding: '8px 12px', background: 'rgba(255,183,77,0.08)', borderBottom: '1px solid #333', borderRadius: 4 }}>
