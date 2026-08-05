@@ -175,7 +175,8 @@ export function loadClaudeSession(path: string): Session {
     try { obj = JSON.parse(line); } catch { continue; }
     rawLines.push(obj);
     if (obj.isMeta) continue;
-    if (obj.sessionId) sessionId = obj.sessionId;
+    const sid = obj.sessionId ?? obj.session_id;
+    if (sid) sessionId = sid;
     if (obj.cwd) cwd = obj.cwd;
     const ts = parseTimestampToMs(obj.timestamp);
     if (ts !== undefined) {

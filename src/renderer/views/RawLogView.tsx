@@ -74,9 +74,10 @@ export function RawLogView() {
         {filter !== 'all' && <span style={{ fontSize: 11, opacity: 0.6 }}>筛选后 {filtered.length} 行</span>}
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {capped.map((line, i) => (
-          <RawLine key={i} index={i} line={line} />
-        ))}
+        {capped.map((line, i) => {
+          const key = typeof line.uuid === 'string' ? line.uuid : `line-${i}`;
+          return <RawLine key={key} index={i} line={line} />;
+        })}
         {overflow > 0 && (
           <div style={{ padding: '8px 12px', fontSize: 11, opacity: 0.5 }}>
             … 还有 {overflow} 行（已截断，仅显示前 {MAX_LINES} 行）
