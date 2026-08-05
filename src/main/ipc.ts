@@ -111,6 +111,15 @@ function flushLiveSave(): void {
     clearTimeout(rt.saveTimer);
     rt.saveTimer = null;
   }
+  // Skip persistence if nothing was actually captured. If a previous save
+  // already created the file, remove it so the empty capture doesn't linger.
+  if (rt.session.requests.length === 0 && rt.session.conversation.length === 0) {
+    try {
+      const { existsSync, unlinkSync } = require('fs') as typeof import('fs');
+      if (existsSync(rt.path)) unlinkSync(rt.path);
+    } catch { /* best-effort */ }
+    return;
+  }
   try {
     const store = ensureLiveStore();
     store.saveSessionAtPath(rt.session, rt.path);
