@@ -28,17 +28,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx electron-builder --${{ matrix.target }}
-        env:
-          # macOS: 不尝试代码签名（无证书），避免构建失败
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-      - name: Upload installers to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/*.exe
-            dist/*.dmg
-            dist/*.AppImage
-            dist/*.deb
+      - run: npx electron-builder --${{ matrix.target }} --publish onTag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS: 不尝试代码签名（无证书），避免构建失败
+          CSC_IDENTITY_AUTO_DISCOVERY: false

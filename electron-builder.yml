@@ -4,3 +4,8 @@ directories:
   output: dist
 files:
   - out/**/*
+linux:
+  category: Utility
+  target:
+    - AppImage
+    - deb
