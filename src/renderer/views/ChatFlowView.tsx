@@ -1,14 +1,15 @@
 // src/renderer/views/ChatFlowView.tsx
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
+import { CodeViewer, languageFromPath } from '../components/CodeViewer';
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-function Block({ block }: { block: ContentBlock }) {
+function Block({ block, lang }: { block: ContentBlock; lang?: string }) {
   switch (block.type) {
     case 'text':
       return <div style={{ whiteSpace: 'pre-wrap' }}>{block.text}</div>;
@@ -26,9 +27,9 @@ function Block({ block }: { block: ContentBlock }) {
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(129,199,132,0.1)', borderLeft: '3px solid #81c784', borderRadius: '0 4px 4px 0', fontSize: 12 }}>
           <span style={{ color: '#81c784', fontWeight: 600 }}>📥 tool_result</span>
-          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-            {raw}
-          </pre>
+          <div style={{ marginTop: 4 }}>
+            <CodeViewer value={raw} language={lang} />
+          </div>
         </div>
       );
     }
@@ -43,7 +44,7 @@ function Block({ block }: { block: ContentBlock }) {
   }
 }
 
-function Message({ role, blocks, meta }: { role: string; blocks: ContentBlock[]; meta?: import('../../main/model/types').MessageMeta }) {
+function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: ContentBlock[]; meta?: import('../../main/model/types').MessageMeta; toolUseLangs?: Map<string, string> }) {
   const [open, setOpen] = useState(true);
   const colors: Record<string, { bg: string; label: string; icon: string }> = {
     user: { bg: 'rgba(144,202,250,0.1)', label: 'USER', icon: '👤' },
@@ -75,7 +76,10 @@ function Message({ role, blocks, meta }: { role: string; blocks: ContentBlock[];
         {ts && <span style={{ opacity: 0.5 }}>{ts}</span>}
         {meta?.gitBranch && <span style={{ opacity: 0.5 }}>🌿 {meta.gitBranch}</span>}
       </div>
-      {open && blocks.map((b, i) => <Block key={i} block={b} />)}
+      {open && blocks.map((b, i) => {
+        const lang = b.type === 'tool_result' ? toolUseLangs?.get(b.toolUseId) : undefined;
+        return <Block key={i} block={b} lang={lang} />;
+      })}
     </div>
   );
 }
@@ -85,6 +89,19 @@ export function ChatFlowView() {
   const messages = session?.conversation ?? [];
   const system = session?.requests?.[0]?.system ?? [];
   const [systemOpen, setSystemOpen] = useState(false);
+
+  const toolUseLangs = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const msg of messages) {
+      for (const b of msg.content) {
+        if (b.type === 'tool_use' && b.input && typeof b.input === 'object') {
+          const lang = languageFromPath((b.input as { file_path?: string }).file_path);
+          if (lang) m.set(b.id, lang);
+        }
+      }
+    }
+    return m;
+  }, [messages]);
 
   if (!session) {
     return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
@@ -112,7 +129,7 @@ export function ChatFlowView() {
           data={messages}
           itemContent={(index, m) => (
             <div style={{ padding: '0 12px' }}>
-              <Message role={m.role} blocks={m.content} meta={m.meta} />
+              <Message role={m.role} blocks={m.content} meta={m.meta} toolUseLangs={toolUseLangs} />
             </div>
           )}
           style={{ height: '100%' }}
