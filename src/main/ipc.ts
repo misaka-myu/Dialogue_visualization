@@ -16,6 +16,31 @@ function claudeSettingsPath(): string {
   return join(homedir(), '.claude', 'settings.json');
 }
 
+/** Durable storage for the REAL original upstream, so we can recover if
+ *  settings.json was polluted (left pointing at a previous proxy) by a
+ *  capture that wasn't stopped. */
+function storedUpstreamPath(): string {
+  return join(homedir(), '.claude', '.dialogueviz-upstream');
+}
+
+function readStoredUpstream(): string | null {
+  try {
+    if (existsSync(storedUpstreamPath())) {
+      const v = readFileSync(storedUpstreamPath(), 'utf-8').trim();
+      return v || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function writeStoredUpstream(url: string): void {
+  try { writeFileSync(storedUpstreamPath(), url); } catch { /* ignore */ }
+}
+
+function isLocalhostUrl(u: string): boolean {
+  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(u);
+}
+
 let proxyServer: ProxyServer | null = null;
 let savedBaseUrl: string | undefined | null = null;  // null = not captured yet; undefined = key absent
 
@@ -37,24 +62,36 @@ export function registerIpc(): void {
       return { port: proxyServer.port, upstream: proxyServer.upstream };
     }
     try {
-      // Read original ANTHROPIC_BASE_URL from settings.json BEFORE rewriting.
+      // Determine the REAL original upstream BEFORE rewriting settings.json.
+      // If settings.json is already pointing at a localhost proxy (left over
+      // from a previous capture that wasn't stopped), recover the real original
+      // from durable storage instead of using the stale localhost URL.
       const settingsPath = claudeSettingsPath();
-      let upstream = 'https://api.anthropic.com';
       let settings: any = {};
+      let currentBaseUrl: string | undefined;
       if (existsSync(settingsPath)) {
         try {
           settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-          const env = settings.env ?? (settings.env = {});
-          if (typeof env.ANTHROPIC_BASE_URL === 'string') {
-            savedBaseUrl = env.ANTHROPIC_BASE_URL;
-            upstream = env.ANTHROPIC_BASE_URL;
-          } else {
-            savedBaseUrl = undefined;
+          settings.env = settings.env ?? {};
+          if (typeof settings.env.ANTHROPIC_BASE_URL === 'string') {
+            currentBaseUrl = settings.env.ANTHROPIC_BASE_URL;
           }
         } catch { /* corrupt settings - leave as-is */ }
       }
 
-      // Start proxy first (with the original upstream), so it's ready when claude connects.
+      let upstream: string;
+      if (currentBaseUrl && !isLocalhostUrl(currentBaseUrl)) {
+        // Clean real upstream - use it and persist for future recovery.
+        upstream = currentBaseUrl;
+        writeStoredUpstream(currentBaseUrl);
+      } else {
+        // Polluted (localhost) or absent - recover from durable storage, else default.
+        const stored = readStoredUpstream();
+        upstream = stored ?? 'https://api.anthropic.com';
+      }
+      savedBaseUrl = upstream;
+
+      // Start proxy with the real upstream.
       proxyServer = await startProxyServer(8787, upstream);
       proxyServer.onCaptured((apiRequest) => {
         const windows = BrowserWindow.getAllWindows();
@@ -85,20 +122,19 @@ export function registerIpc(): void {
       await proxyServer.stop();
       proxyServer = null;
     }
-    // Restore settings.json to original state.
+    // Restore settings.json to the REAL original upstream (savedBaseUrl).
     if (savedBaseUrl !== null) {
       const settingsPath = claudeSettingsPath();
       if (existsSync(settingsPath)) {
         try {
           const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-          if (settings.env) {
-            if (savedBaseUrl === undefined) {
-              delete settings.env.ANTHROPIC_BASE_URL;
-            } else {
-              settings.env.ANTHROPIC_BASE_URL = savedBaseUrl;
-            }
-            writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+          settings.env = settings.env ?? {};
+          if (savedBaseUrl === undefined) {
+            delete settings.env.ANTHROPIC_BASE_URL;
+          } else {
+            settings.env.ANTHROPIC_BASE_URL = savedBaseUrl;
           }
+          writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
         } catch (err) {
           console.error('[proxy] failed to restore settings.json:', err);
         }
