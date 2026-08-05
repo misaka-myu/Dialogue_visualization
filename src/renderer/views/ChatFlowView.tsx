@@ -1,15 +1,8 @@
 // src/renderer/views/ChatFlowView.tsx
 import { useState } from 'react';
+import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
-
-const MAX_RENDERED_MESSAGES = 200;
-const MAX_CONTENT_CHARS = 5000;
-
-function truncateText(text: string): string {
-  if (text.length <= MAX_CONTENT_CHARS) return text;
-  return text.slice(0, MAX_CONTENT_CHARS) + `… (截断，共 ${text.length} 字符)`;
-}
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -18,13 +11,13 @@ function estimateTokens(text: string): number {
 function Block({ block }: { block: ContentBlock }) {
   switch (block.type) {
     case 'text':
-      return <div style={{ whiteSpace: 'pre-wrap' }}>{truncateText(block.text)}</div>;
+      return <div style={{ whiteSpace: 'pre-wrap' }}>{block.text}</div>;
     case 'tool_use':
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
           <span>🔧 <strong>tool_use: {block.name}</strong></span>
-          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto' }}>
-            {truncateText(JSON.stringify(block.input, null, 2))}
+          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {JSON.stringify(block.input, null, 2)}
           </pre>
         </div>
       );
@@ -33,16 +26,16 @@ function Block({ block }: { block: ContentBlock }) {
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(129,199,132,0.1)', borderLeft: '3px solid #81c784', borderRadius: '0 4px 4px 0', fontSize: 12 }}>
           <span style={{ color: '#81c784', fontWeight: 600 }}>📥 tool_result</span>
-          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto' }}>
-            {truncateText(raw)}
+          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {raw}
           </pre>
         </div>
       );
     }
     case 'thinking':
       return (
-        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(206,147,216,0.1)', borderRadius: 4, fontSize: 12, opacity: 0.7 }}>
-          💭 {truncateText(block.thinking)}
+        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(206,147,216,0.1)', borderRadius: 4, fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
+          💭 {block.thinking}
         </div>
       );
     default:
@@ -58,8 +51,14 @@ function Message({ role, blocks, meta }: { role: string; blocks: ContentBlock[];
     system: { bg: 'rgba(255,183,77,0.08)', label: 'SYSTEM', icon: '⚙️' },
   };
   const c = colors[role] ?? colors.user;
-  const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
-  const toks = estimateTokens(text);
+  const fullText = blocks.map((b) => {
+    if (b.type === 'text') return b.text;
+    if (b.type === 'thinking') return b.thinking;
+    if (b.type === 'tool_use') return b.name + ' ' + JSON.stringify(b.input);
+    if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
+    return '';
+  }).join('');
+  const toks = estimateTokens(fullText);
   const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
   return (
     <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
@@ -86,13 +85,10 @@ export function ChatFlowView() {
     return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
   }
 
-  const capped = messages.slice(0, MAX_RENDERED_MESSAGES);
-  const overflow = messages.length - capped.length;
-
   return (
-    <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {system.length > 0 && (
-        <div style={{ marginBottom: 6 }}>
+        <div style={{ padding: '6px 12px 0' }}>
           <button
             onClick={() => setSystemOpen(!systemOpen)}
             style={{ padding: '4px 8px', background: 'rgba(255,183,77,0.08)', border: 'none', borderRadius: 4, cursor: 'pointer', color: 'inherit' }}
@@ -102,14 +98,17 @@ export function ChatFlowView() {
           {systemOpen && system.map((b, i) => <Block key={i} block={b} />)}
         </div>
       )}
-      {overflow > 0 && (
-        <div style={{ padding: '4px 8px', marginBottom: 6, fontSize: 11, opacity: 0.6, background: 'rgba(255,183,77,0.06)', borderRadius: 4 }}>
-          显示前 {MAX_RENDERED_MESSAGES} 条，共 {messages.length} 条
-        </div>
-      )}
-      {capped.map((m, i) => (
-        <Message key={i} role={m.role} blocks={m.content} meta={m.meta} />
-      ))}
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Virtuoso
+          data={messages}
+          itemContent={(index, m) => (
+            <div style={{ padding: '0 12px' }}>
+              <Message role={m.role} blocks={m.content} meta={m.meta} />
+            </div>
+          )}
+          style={{ height: '100%' }}
+        />
+      </div>
     </div>
   );
 }
