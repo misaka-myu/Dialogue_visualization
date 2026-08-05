@@ -131,7 +131,7 @@ function extractText(content: unknown): string {
 
 interface JsonlLine {
   type?: string;
-  message?: { role?: string; content?: unknown };
+  message?: { role?: string; content?: unknown; usage?: Record<string, unknown>; model?: string; id?: string };
   sessionId?: string;
   cwd?: string;
   timestamp?: string;
@@ -143,6 +143,9 @@ interface ConvoMessage {
   role: 'user' | 'assistant' | 'tool';
   content: import('../model/types').ContentBlock[];
   ts?: number;
+  usage?: Record<string, unknown>;
+  model?: string;
+  messageId?: string;
 }
 
 export function loadClaudeSession(path: string): Session {
@@ -174,7 +177,7 @@ export function loadClaudeSession(path: string): Session {
     if (role === 'user' && content.every((b) => b.type === 'tool_result')) {
       role = 'tool';
     }
-    convo.push({ role, content, ts });
+    convo.push({ role, content, ts, usage: msg.usage, model: msg.model, messageId: msg.id });
   }
 
   const conversation: Message[] = [];
@@ -182,14 +185,26 @@ export function loadClaudeSession(path: string): Session {
   for (const m of convo) {
     if (m.role === 'assistant') {
       const reqId = `${sessionId ?? 'sess'}-${requests.length}`;
+      const u = m.usage ?? {};
       requests.push({
         id: reqId,
         timestamp: m.ts ?? lastTs ?? Date.now(),
-        model: '',
+        model: m.model ?? '',
         system: [],
         messageCount: conversation.length,
         params: { maxTokens: 0 },
-        response: { content: m.content, stopReason: '', usage: emptyUsage() },
+        response: {
+          content: m.content,
+          stopReason: '',
+          usage: {
+            inputTokens: Number(u.input_tokens) || 0,
+            outputTokens: Number(u.output_tokens) || 0,
+            cacheReadTokens: Number(u.cache_read_input_tokens) || 0,
+            cacheCreationTokens: Number(u.cache_creation_input_tokens) || 0,
+            model: m.model,
+            messageId: m.messageId,
+          },
+        },
       });
       conversation.push({ role: 'assistant', content: m.content });
     } else {
