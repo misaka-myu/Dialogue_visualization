@@ -24,6 +24,7 @@ interface NodeProps {
 
 export function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
   const [localOpen, setLocalOpen] = useState(depth < DEFAULT_OPEN_DEPTH);
+  const [showAll, setShowAll] = useState(false);
   const open = forceOpen || localOpen;
 
   if (value === null || value === undefined) {
@@ -55,7 +56,7 @@ export function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
   const allEntries: [string, unknown][] = isArray
     ? (value as unknown[]).map((v, i) => [String(i), v])
     : Object.entries(value as object);
-  const capped = allEntries.length > MAX_ARRAY_CHILDREN ? allEntries.slice(0, MAX_ARRAY_CHILDREN) : allEntries;
+  const capped = !showAll && allEntries.length > MAX_ARRAY_CHILDREN ? allEntries.slice(0, MAX_ARRAY_CHILDREN) : allEntries;
   const overflow = allEntries.length - capped.length;
 
   const blockType = typeof value === 'object' && value !== null && 'type' in (value as any) ? (value as any).type : undefined;
@@ -77,9 +78,12 @@ export function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
             <JsonNode key={k} label={k} value={v} forceOpen={forceOpen} depth={depth + 1} />
           ))}
           {overflow > 0 && (
-            <div style={{ paddingLeft: (depth + 1) * 14, opacity: 0.5, fontSize: 11 }}>
-              … 还有 {overflow} 项（已截断，仅显示前 {MAX_ARRAY_CHILDREN} 项）
-            </div>
+            <button
+              onClick={() => setShowAll(true)}
+              style={{ marginLeft: (depth + 1) * 14, fontSize: 11, opacity: 0.7, background: 'transparent', border: '1px solid #444', color: 'inherit', borderRadius: 3, padding: '2px 8px', cursor: 'pointer' }}
+            >
+              … 展开剩余 {overflow} 项（当前仅显示前 {MAX_ARRAY_CHILDREN} 项）
+            </button>
           )}
         </>
       )}
