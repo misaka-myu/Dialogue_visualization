@@ -15,8 +15,14 @@ export function ViewSwitcher() {
     { kind: 'raw-log', label: '原始日志' },
   ];
 
+  const copyCmd = () => {
+    if (!proxyStatus) return;
+    const cmd = `set ANTHROPIC_BASE_URL=http://localhost:${proxyStatus.port} && claude`;
+    navigator.clipboard?.writeText(cmd);
+  };
+
   return (
-    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 12px', borderBottom: '1px solid #333' }}>
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 12px', borderBottom: '1px solid #333', flexWrap: 'wrap' }}>
       {views.map((v) => (
         <button
           key={v.kind}
@@ -32,7 +38,14 @@ export function ViewSwitcher() {
       ))}
       {proxyStatus ? (
         <>
-          <span style={{ fontSize: 11, color: '#81c784' }}>● 捕获中 :{proxyStatus.port} → {proxyStatus.upstream}</span>
+          <span style={{ fontSize: 11, color: '#81c784' }}>● 捕获中 :{proxyStatus.port}</span>
+          <button
+            onClick={copyCmd}
+            style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(155,140,255,0.2)', border: '1px solid #444', color: 'inherit', fontSize: 11 }}
+            title="复制启动命令到剪贴板，在终端粘贴运行"
+          >
+            📋 复制启动命令
+          </button>
           <button
             onClick={() => stopCapture()}
             style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(239,83,80,0.2)', border: '1px solid #444', color: 'inherit' }}

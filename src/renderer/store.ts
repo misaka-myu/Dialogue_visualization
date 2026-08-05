@@ -94,7 +94,6 @@ export const useStore = create<State>((set, get) => ({
       }
       set({ currentSession: { ...s, requests, conversation } });
     });
-    await window.api.launchClaude(status.port);
   },
   stopCapture: async () => {
     await window.api.stopProxy();
