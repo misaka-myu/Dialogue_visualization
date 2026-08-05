@@ -48,6 +48,18 @@ export function RawLogView() {
     return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
   }
 
+  // Proxy-live captures only see structured API traffic — no underlying
+  // JSONL lines exist. Show an explanation instead of a blank list.
+  if (session.source === 'proxy-live') {
+    return (
+      <div style={{ padding: 24, opacity: 0.7 }}>
+        实时捕获看不到原始 JSONL 行 —— 代理只转发 API 请求。
+        <br />
+        请切到 “对话流” 或 “JSON 树” 查看捕获内容。
+      </div>
+    );
+  }
+
   const all = (session.rawLines ?? []) as Record<string, unknown>[];
   const types = Array.from(new Set(all.map(lineType)));
   const filtered = filter === 'all' ? all : all.filter((l) => lineType(l) === filter);

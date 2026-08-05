@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
-import { scanClaudeSessions, parseSessionMeta, loadClaudeSession } from '../../src/main/adapters/claude-log';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { scanClaudeSessions, parseSessionMeta, loadClaudeSession, deleteClaudeSession, exportClaudeSession } from '../../src/main/adapters/claude-log';
 import { resolve } from 'path';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 
 const fixturesDir = resolve(__dirname, '../fixtures');
 
@@ -68,5 +69,81 @@ describe('loadClaudeSession', () => {
     expect(session.requests[0].system).toEqual([]);
     expect(session.requests[0].tools).toBeUndefined();
     expect(session.requests[0].model).toBe('');
+  });
+});
+
+describe('deleteClaudeSession', () => {
+  const tmpDir = resolve(__dirname, '../.tmp-delete-test');
+
+  beforeEach(() => {
+    mkdirSync(tmpDir, { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('removes the .jsonl file', () => {
+    const src = resolve(tmpDir, 'a.jsonl');
+    copyFileSync(resolve(fixturesDir, 'simple-session.jsonl'), src);
+    expect(existsSync(src)).toBe(true);
+    expect(deleteClaudeSession(src)).toBe(true);
+    expect(existsSync(src)).toBe(false);
+  });
+
+  it('also removes same-basename sidecar files in the same directory', () => {
+    const src = resolve(tmpDir, 'b.jsonl');
+    copyFileSync(resolve(fixturesDir, 'simple-session.jsonl'), src);
+    // Sidecars sharing the basename "b" (basename = id without .jsonl).
+    const lock = resolve(tmpDir, 'b.lock');
+    const meta = resolve(tmpDir, 'b.meta.json');
+    const otherSession = resolve(tmpDir, 'ba.jsonl'); // different session id, must not be deleted
+    const subdir = resolve(tmpDir, 'b'); // directory with same name as base — must not be touched
+    writeFileSync(lock, 'lock data', 'utf-8');
+    writeFileSync(meta, '{}', 'utf-8');
+    writeFileSync(otherSession, '{}', 'utf-8');
+    mkdirSync(subdir, { recursive: true });
+    writeFileSync(resolve(subdir, 'inside.txt'), 'data', 'utf-8');
+
+    expect(deleteClaudeSession(src)).toBe(true);
+
+    expect(existsSync(src)).toBe(false);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(meta)).toBe(false);
+    // A different session id (`ba.jsonl`) shares a string prefix with `b`
+    // but must NOT be deleted.
+    expect(existsSync(otherSession)).toBe(true);
+    // A subdirectory whose name equals the base must not be followed into.
+    expect(existsSync(subdir)).toBe(true);
+    expect(existsSync(resolve(subdir, 'inside.txt'))).toBe(true);
+  });
+
+  it('returns false for a missing file', () => {
+    expect(deleteClaudeSession(resolve(tmpDir, 'nope.jsonl'))).toBe(false);
+  });
+});
+
+describe('exportClaudeSession', () => {
+  const tmpDir = resolve(__dirname, '../.tmp-export-test');
+
+  beforeEach(() => {
+    mkdirSync(tmpDir, { recursive: true });
+  });
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('copies the JSONL to the export path and leaves the original', () => {
+    const src = resolve(tmpDir, 'orig.jsonl');
+    copyFileSync(resolve(fixturesDir, 'simple-session.jsonl'), src);
+    const dest = resolve(tmpDir, 'exported.jsonl');
+    const result = exportClaudeSession(src, dest);
+    expect(result).toBe(dest);
+    expect(existsSync(dest)).toBe(true);
+    expect(existsSync(src)).toBe(true);
+    expect(readFileSync(dest, 'utf-8')).toBe(readFileSync(src, 'utf-8'));
+  });
+
+  it('returns null for a missing source', () => {
+    expect(exportClaudeSession(resolve(tmpDir, 'gone.jsonl'), resolve(tmpDir, 'out.jsonl'))).toBeNull();
   });
 });

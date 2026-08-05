@@ -6,3 +6,10 @@ button { font-family: inherit; }
 #root { height: 100vh; display: flex; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: #444; border-radius: 4px; }
+
+/* ConversationDirectory: show the per-row menu trigger only on row hover,
+   or while the menu is open (so the click stays usable after opening). */
+.directory-row-trigger { opacity: 0; transition: opacity 0.1s; }
+[role="button"]:hover .directory-row-trigger,
+.directory-row-trigger:focus,
+.directory-row-trigger[aria-expanded="true"] { opacity: 1; }

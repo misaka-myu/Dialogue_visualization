@@ -22,6 +22,8 @@ export interface MessageMeta {
   entrypoint?: string;
   promptId?: string;
   model?: string;
+  /** Real output_tokens for an assistant message (from the response usage). */
+  outputTokens?: number;
 }
 
 export interface Message {
@@ -71,6 +73,8 @@ export interface ApiRequest {
   metadata?: Record<string, unknown>;
   response?: ApiResponse;
   transformMode?: boolean;
+  /** For proxy-live captures: the full input messages of this request. */
+  inputMessages?: Message[];
 }
 
 export interface Session {

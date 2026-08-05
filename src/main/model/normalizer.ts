@@ -41,7 +41,7 @@ function normalizeSystem(system: unknown): ContentBlock[] {
   return normalizeContent(system);
 }
 
-function normalizeMessages(messages: unknown): Message[] {
+export function normalizeMessages(messages: unknown): Message[] {
   if (!Array.isArray(messages)) return [];
   return messages.map((m: RawBlock) => ({
     role: m.role,
