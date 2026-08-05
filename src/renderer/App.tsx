@@ -1,5 +1,5 @@
 // src/renderer/App.tsx
-import { Component, ReactNode } from 'react';
+import { Component, ReactNode, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { ViewSwitcher } from './components/ViewSwitcher';
 import { JsonTreeView } from './views/JsonTreeView';
@@ -19,6 +19,41 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: string |
     }
     return this.props.children as ReactNode;
   }
+}
+
+/** Transient status banner. Reads `store.toast` and auto-clears after 2.5s
+ *  so the next setToast wins cleanly. Replaces the old window.alert calls
+ *  (which block the renderer thread in Electron). */
+function Toast() {
+  const toast = useStore((s) => s.toast);
+  const setToast = useStore((s) => s.setToast);
+  useEffect(() => {
+    if (!toast) return;
+    const id = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(id);
+  }, [toast, setToast]);
+  if (!toast) return null;
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'fixed',
+        top: 16,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        zIndex: 1000,
+        padding: '8px 16px',
+        background: 'rgba(40,40,40,0.95)',
+        border: '1px solid #555',
+        borderRadius: 4,
+        fontSize: 12,
+        boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
+        pointerEvents: 'none',
+      }}
+    >
+      {toast}
+    </div>
+  );
 }
 
 export function App() {
@@ -80,6 +115,7 @@ export function App() {
           {directoryOpen ? '›' : '‹'}
         </div>
       </div>
+      <Toast />
     </>
   );
 }
