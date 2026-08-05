@@ -9,9 +9,25 @@ export type ContentBlock =
   | { type: 'image'; source: { type: string; data?: string; url?: string; mediaType: string } }
   | { type: 'thinking'; thinking: string; signature?: string };
 
+export interface MessageMeta {
+  timestamp?: number;
+  uuid?: string;
+  parentUuid?: string;
+  isSidechain?: boolean;
+  effort?: string;
+  cwd?: string;
+  gitBranch?: string;
+  version?: string;
+  userType?: string;
+  entrypoint?: string;
+  promptId?: string;
+  model?: string;
+}
+
 export interface Message {
   role: Role;
   content: ContentBlock[];
+  meta?: MessageMeta;
 }
 
 export interface ToolDef {
@@ -69,6 +85,9 @@ export interface Session {
   /** Flat linear conversation array — each message stored exactly once.
    *  A request's input messages = conversation.slice(0, request.messageCount). */
   conversation: Message[];
+  /** Every parsed raw JSONL line in order (all types: user/assistant/system/attachment/snapshot/...).
+   *  For the raw-log view - nothing discarded. */
+  rawLines?: unknown[];
   totalTokens?: number;
 }
 

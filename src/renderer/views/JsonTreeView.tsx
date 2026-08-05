@@ -1,7 +1,9 @@
 // src/renderer/views/JsonTreeView.tsx
 import { useState } from 'react';
 import { useStore } from '../store';
-import { ApiRequest } from '../../main/model/types';
+
+const MAX_ARRAY_CHILDREN = 50;
+const DEFAULT_OPEN_DEPTH = 2;
 
 function typeColor(type: string): string {
   switch (type) {
@@ -16,27 +18,45 @@ function typeColor(type: string): string {
 interface NodeProps {
   label?: string;
   value: unknown;
-  defaultOpen?: boolean;
+  forceOpen: boolean;
   depth: number;
 }
 
-function JsonNode({ label, value, defaultOpen = true, depth }: NodeProps) {
-  const [open, setOpen] = useState(defaultOpen);
+export function JsonNode({ label, value, forceOpen, depth }: NodeProps) {
+  const [localOpen, setLocalOpen] = useState(depth < DEFAULT_OPEN_DEPTH);
+  const open = forceOpen || localOpen;
 
   if (value === null || value === undefined) {
-    return <div style={{ paddingLeft: depth * 14 }}>{label && <span style={{ color: '#9b8cff' }}>{label}: </span>}<span style={{ opacity: 0.5 }}>{value === null ? 'null' : 'undefined'}</span></div>;
+    return (
+      <div style={{ paddingLeft: depth * 14 }}>
+        {label && <span style={{ color: '#9b8cff' }}>{label}: </span>}
+        <span style={{ opacity: 0.5 }}>{value === null ? 'null' : 'undefined'}</span>
+      </div>
+    );
   }
   if (typeof value === 'string') {
-    return <div style={{ paddingLeft: depth * 14 }}>{label && <span style={{ color: '#9b8cff' }}>{label}: </span>}<span style={{ color: '#90caf9' }}>"{value.length > 80 ? value.slice(0, 80) + '…' : value}"</span></div>;
+    return (
+      <div style={{ paddingLeft: depth * 14 }}>
+        {label && <span style={{ color: '#9b8cff' }}>{label}: </span>}
+        <span style={{ color: '#90caf9' }}>"{value.length > 80 ? value.slice(0, 80) + '…' : value}"</span>
+      </div>
+    );
   }
   if (typeof value === 'number' || typeof value === 'boolean') {
-    return <div style={{ paddingLeft: depth * 14 }}>{label && <span style={{ color: '#9b8cff' }}>{label}: </span>}<span style={{ color: '#ffb74d' }}>{String(value)}</span></div>;
+    return (
+      <div style={{ paddingLeft: depth * 14 }}>
+        {label && <span style={{ color: '#9b8cff' }}>{label}: </span>}
+        <span style={{ color: '#ffb74d' }}>{String(value)}</span>
+      </div>
+    );
   }
 
   const isArray = Array.isArray(value);
-  const entries = isArray
-    ? value.map((v, i) => [String(i), v] as const)
+  const allEntries: [string, unknown][] = isArray
+    ? (value as unknown[]).map((v, i) => [String(i), v])
     : Object.entries(value as object);
+  const capped = allEntries.length > MAX_ARRAY_CHILDREN ? allEntries.slice(0, MAX_ARRAY_CHILDREN) : allEntries;
+  const overflow = allEntries.length - capped.length;
 
   const blockType = typeof value === 'object' && value !== null && 'type' in (value as any) ? (value as any).type : undefined;
 
@@ -44,38 +64,52 @@ function JsonNode({ label, value, defaultOpen = true, depth }: NodeProps) {
     <div>
       <div
         style={{ paddingLeft: depth * 14, cursor: 'pointer', userSelect: 'none' }}
-        onClick={() => setOpen(!open)}
+        onClick={() => setLocalOpen(!localOpen)}
       >
         <span style={{ opacity: 0.6 }}>{open ? '▼' : '▶'}</span>
         {label && <span style={{ color: '#9b8cff' }}> {label}</span>}
         {blockType && <span style={{ color: typeColor(blockType), marginLeft: 6 }}>[{blockType}]</span>}
-        <span style={{ opacity: 0.4, marginLeft: 6 }}>{isArray ? `[${entries.length}]` : `{${entries.length}}`}</span>
+        <span style={{ opacity: 0.4, marginLeft: 6 }}>{isArray ? `[${allEntries.length}]` : `{${allEntries.length}}`}</span>
       </div>
-      {open && entries.map(([k, v]) => (
-        <JsonNode key={k} label={k} value={v} defaultOpen={depth < 1} depth={depth + 1} />
-      ))}
+      {open && (
+        <>
+          {capped.map(([k, v]) => (
+            <JsonNode key={k} label={k} value={v} forceOpen={forceOpen} depth={depth + 1} />
+          ))}
+          {overflow > 0 && (
+            <div style={{ paddingLeft: (depth + 1) * 14, opacity: 0.5, fontSize: 11 }}>
+              … 还有 {overflow} 项（已截断，仅显示前 {MAX_ARRAY_CHILDREN} 项）
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 export function JsonTreeView() {
-  const req = useStore((s) => s.currentRequest);
-  const messages = useStore((s) => s.currentRequestMessages);
-  if (!req) {
-    return <div style={{ padding: 24, opacity: 0.5 }}>选中一个会话和请求以查看 JSON 结构</div>;
+  const session = useStore((s) => s.currentSession);
+  const [forceOpen, setForceOpen] = useState(false);
+
+  if (!session) {
+    return <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>;
   }
-  const view: Partial<ApiRequest> & { messages: typeof messages } = {
-    model: req.model,
-    system: req.system,
-    messageCount: req.messageCount,
-    messages,
-    tools: req.tools,
-    params: req.params,
-    response: req.response,
+
+  const btnStyle: React.CSSProperties = {
+    padding: '3px 8px', fontSize: 11, cursor: 'pointer',
+    background: 'transparent', border: '1px solid #444', color: 'inherit', borderRadius: 3,
   };
+
   return (
-    <div style={{ padding: 12, fontFamily: 'ui-monospace, monospace', fontSize: 12, overflow: 'auto', height: '100%' }}>
-      <JsonNode value={view} defaultOpen={true} depth={0} />
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ padding: '4px 12px', borderBottom: '1px solid #333', display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button style={btnStyle} onClick={() => setForceOpen(true)}>展开全部</button>
+        <button style={btnStyle} onClick={() => setForceOpen(false)}>折叠到默认</button>
+        <span style={{ opacity: 0.5, fontSize: 11 }}>大数组截断显示前 {MAX_ARRAY_CHILDREN} 项</span>
+      </div>
+      <div style={{ padding: 12, fontFamily: 'ui-monospace, monospace', fontSize: 12, overflow: 'auto', flex: 1 }}>
+        <JsonNode label="session" value={session} forceOpen={forceOpen} depth={0} />
+      </div>
     </div>
   );
 }

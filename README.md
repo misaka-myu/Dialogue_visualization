@@ -146,4 +146,4 @@ cc-switch 是一个成熟的多供应商 API 网关，本工具只借鉴其"扫�
 
 ## License
 
-MIT
+GPL-3.0-or-later。详见 [LICENSE](LICENSE)。

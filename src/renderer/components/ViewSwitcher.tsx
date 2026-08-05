@@ -5,12 +5,11 @@ export function ViewSwitcher() {
   const currentView = useStore((s) => s.currentView);
   const setCurrentView = useStore((s) => s.setCurrentView);
   const currentSession = useStore((s) => s.currentSession);
-  const currentRequest = useStore((s) => s.currentRequest);
-  const setCurrentRequest = useStore((s) => s.setCurrentRequest);
 
   const views: { kind: ViewKind; label: string }[] = [
     { kind: 'chat-flow', label: '对话流' },
     { kind: 'json-tree', label: 'JSON 树' },
+    { kind: 'raw-log', label: '原始日志' },
   ];
 
   return (
@@ -29,18 +28,9 @@ export function ViewSwitcher() {
         </button>
       ))}
       {currentSession && (
-        <select
-          value={currentRequest?.id ?? ''}
-          onChange={(e) => {
-            const req = currentSession.requests.find((r) => r.id === e.target.value);
-            setCurrentRequest(req ?? null);
-          }}
-          style={{ marginLeft: 'auto', padding: 4, background: '#222', color: 'inherit', border: '1px solid #444' }}
-        >
-          {currentSession.requests.map((r, i) => (
-            <option key={r.id} value={r.id}>请求 #{i + 1}</option>
-          ))}
-        </select>
+        <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.6 }}>
+          {currentSession.requests.length} 请求 · {currentSession.conversation.length} 条对话
+        </span>
       )}
     </div>
   );

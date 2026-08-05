@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { Session, ApiRequest, Message } from '../main/model/types';
 import { SessionMeta } from '../main/adapters/claude-log';
 
-export type ViewKind = 'json-tree' | 'chat-flow';
+export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log';
 
 interface State {
   sessions: SessionMeta[];

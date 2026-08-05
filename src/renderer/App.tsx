@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { ViewSwitcher } from './components/ViewSwitcher';
 import { JsonTreeView } from './views/JsonTreeView';
 import { ChatFlowView } from './views/ChatFlowView';
+import { RawLogView } from './views/RawLogView';
 import { useStore } from './store';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -31,7 +32,9 @@ export function App() {
             <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>
           ) : (
             <ErrorBoundary key={currentView}>
-              {currentView === 'json-tree' ? <JsonTreeView /> : <ChatFlowView />}
+              {currentView === 'json-tree' ? <JsonTreeView />
+                : currentView === 'raw-log' ? <RawLogView />
+                : <ChatFlowView />}
             </ErrorBoundary>
           )}
         </div>
