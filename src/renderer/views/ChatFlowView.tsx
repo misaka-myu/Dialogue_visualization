@@ -58,8 +58,14 @@ function Message({ role, blocks, meta }: { role: string; blocks: ContentBlock[];
     system: { bg: 'rgba(255,183,77,0.08)', label: 'SYSTEM', icon: '⚙️' },
   };
   const c = colors[role] ?? colors.user;
-  const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
-  const toks = estimateTokens(text);
+  const fullText = blocks.map((b) => {
+    if (b.type === 'text') return b.text;
+    if (b.type === 'thinking') return b.thinking;
+    if (b.type === 'tool_use') return b.name + ' ' + JSON.stringify(b.input);
+    if (b.type === 'tool_result') return typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
+    return '';
+  }).join('');
+  const toks = estimateTokens(fullText);
   const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
   return (
     <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
