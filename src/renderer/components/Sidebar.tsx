@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { ItemMenu, MenuItem } from './ItemMenu';
+import { useResizable, readStoredWidth } from '../hooks/useResizable';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -70,6 +71,27 @@ export function Sidebar() {
   const openLive = useStore((s) => s.openLive);
   const currentSession = useStore((s) => s.currentSession);
   const proxyStatus = useStore((s) => s.proxyStatus);
+  const sidebarWidth = useStore((s) => s.sidebarWidth);
+  const setSidebarWidth = useStore((s) => s.setSidebarWidth);
+  const [isHandleHover, setIsHandleHover] = useState(false);
+
+  // Hydrate from localStorage once on mount; the hook then handles writes
+  // on each drag-end.
+  useEffect(() => {
+    const stored = readStoredWidth('dialogueviz.sidebar.width', 240);
+    const clamped = Math.max(160, Math.min(480, stored));
+    if (clamped !== sidebarWidth) setSidebarWidth(clamped);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startSidebarResize = useResizable({
+    side: 'left',
+    minWidth: 160,
+    maxWidth: 480,
+    storageKey: 'dialogueviz.sidebar.width',
+    getWidth: () => useStore.getState().sidebarWidth,
+    onWidthChange: setSidebarWidth,
+  });
 
   const deleteLiveCapture = useStore((s) => s.deleteLiveCapture);
   const renameLiveCapture = useStore((s) => s.renameLiveCapture);
@@ -150,8 +172,9 @@ export function Sidebar() {
   }
 
   return (
-    <div style={{ width: 240, borderRight: '1px solid #333', padding: 8, overflowY: 'auto' }}>
-      {proxyStatus && currentSession?.source === 'proxy-live' && (
+    <div style={{ display: 'flex', flexShrink: 0, width: sidebarWidth + 4 }}>
+      <div style={{ width: sidebarWidth, borderRight: '1px solid #333', padding: 8, overflowY: 'auto', overflowX: 'hidden' }}>
+        {proxyStatus && currentSession?.source === 'proxy-live' && (
         <>
           <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>● 实时捕获</div>
           <div
@@ -211,6 +234,20 @@ export function Sidebar() {
           <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''}</div>
         </ListRow>
       ))}
+      </div>
+      <div
+        onMouseDown={startSidebarResize}
+        onMouseEnter={() => setIsHandleHover(true)}
+        onMouseLeave={() => setIsHandleHover(false)}
+        title="拖动调整侧栏宽度"
+        style={{
+          width: 4,
+          cursor: 'col-resize',
+          background: isHandleHover ? '#666' : 'transparent',
+          transition: 'background 0.15s',
+          flexShrink: 0,
+        }}
+      />
     </div>
   );
 }
