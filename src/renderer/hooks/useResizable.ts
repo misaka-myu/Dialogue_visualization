@@ -1,8 +1,7 @@
 // src/renderer/hooks/useResizable.ts
 // Generic horizontal splitter for sidebar / directory strip. The width lives
-// in zustand; this hook owns the mouse drag and emits new widths to the
-// caller. Persistence to localStorage happens via a thin effect in the
-// calling component (so we don't store anything here).
+// in zustand (hydrated from localStorage at store init); this hook owns the
+// mouse drag and emits new widths to the caller.
 
 import { useCallback, useEffect, useRef } from 'react';
 
@@ -62,17 +61,4 @@ export function useResizable({
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
-}
-
-/** Hydrate the initial width from localStorage. Returns the value (or
- *  fallback if storage is unavailable / unset). */
-export function readStoredWidth(storageKey: string, fallback: number): number {
-  try {
-    const v = localStorage.getItem(storageKey);
-    if (v !== null) {
-      const n = Number(v);
-      if (Number.isFinite(n)) return n;
-    }
-  } catch { /* localStorage unavailable */ }
-  return fallback;
 }
