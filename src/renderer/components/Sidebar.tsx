@@ -10,6 +10,43 @@ function formatTime(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+const SECTION_STORAGE_KEY = 'dialogueviz.sidebar.collapsed';
+
+/** Collapsible section: header (click to toggle) + children (hidden when
+ *  collapsed). State persists to localStorage keyed by `id`. */
+function Section({ id, label, color, count, children }: {
+  id: string; label: string; color?: string; count?: number; children?: React.ReactNode;
+}) {
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || '{}');
+      return stored[id] === true;
+    } catch { return false; }
+  });
+  const toggle = () => {
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      const stored = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || '{}');
+      stored[id] = next;
+      localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(stored));
+    } catch { /* ignore */ }
+  };
+  return (
+    <>
+      <div
+        onClick={toggle}
+        style={{ fontSize: 11, opacity: 0.6, textTransform: 'uppercase', marginBottom: 8, marginTop: 4, cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 4, color }}
+      >
+        <span style={{ opacity: 0.5 }}>{collapsed ? '▶' : '▼'}</span>
+        <span>{'●'} {label}</span>
+        {count !== undefined && <span style={{ opacity: 0.5 }}>({count})</span>}
+      </div>
+      {!collapsed && children}
+    </>
+  );
+}
+
 /** Inline-styled list item with an absolutely-positioned ItemMenu. We use a
  *  div + onClick (not a <button>) so the menu trigger can sit on top without
  *  nested-button issues. Keyboard accessibility is a known compromise; the
@@ -62,6 +99,20 @@ function ListRow({
   );
 }
 
+const ORIGINATOR_LABELS: Record<string, string> = {
+  'Codex Desktop': 'Codex 桌面版',
+  'codex-tui': 'Codex CLI',
+  'codex_vscode': 'Codex VS Code',
+  'codex_work_desktop': 'Codex Work',
+  'codex': 'Codex',
+};
+
+const ENTRYPOINT_LABELS: Record<string, string> = {
+  'claude-desktop-3p': 'Claude Desktop',
+  'claude-vscode': 'Claude Code (VS Code)',
+  'cli': 'Claude Code (CLI)',
+};
+
 export function Sidebar() {
   const sessions = useStore((s) => s.sessions);
   const codexSessions = useStore((s) => s.codexSessions);
@@ -109,11 +160,8 @@ export function Sidebar() {
 
   // --- Live capture action handlers ---
   function handleLiveRename(path: string, currentTitle: string) {
-    // The plan calls for a prompt with the current title as the default.
-    // Browsers don't support `defaultValue` in `window.prompt`; we just
-    // prefill via concatenation so the user can edit/clear it.
     const next = window.prompt('重命名历史捕获：', currentTitle);
-    if (next === null) return; // canceled
+    if (next === null) return;
     const trimmed = next.trim();
     if (!trimmed) {
       window.alert('标题不能为空。');
@@ -126,7 +174,7 @@ export function Sidebar() {
   }
 
   function handleLiveDelete(path: string, title: string) {
-    const ok = window.confirm(`确定要删除历史捕获 “${title}” 吗？\n\n该操作不可撤销。`);
+    const ok = window.confirm(`确定要删除历史捕获 "${title}" 吗？\n\n该操作不可撤销。`);
     if (!ok) return;
     deleteLiveCapture(path).then((success) => {
       if (!success) window.alert('删除失败，请检查文件是否被占用。');
@@ -148,9 +196,9 @@ export function Sidebar() {
   function handleClaudeDelete(sourcePath: string, title: string) {
     const display = title || sourcePath;
     const ok = window.confirm(
-      `警告：将永久删除 Claude Code 会话 “${display}”\n\n` +
+      `警告：将永久删除 Claude Code 会话 "${display}"\n\n` +
         `此操作会从 ~/.claude/projects/ 删除原始 JSONL 文件，Claude Code 中也会消失。\n\n` +
-        `建议先点 “导出” 留一份副本。\n\n确定要继续吗？`
+        `建议先点 "导出" 留一份副本。\n\n确定要继续吗？`
     );
     if (!ok) return;
     deleteClaudeSession(sourcePath).then((success) => {
@@ -173,9 +221,9 @@ export function Sidebar() {
   function handleCodexDelete(sourcePath: string, title: string) {
     const display = title || sourcePath;
     const ok = window.confirm(
-      `确定要删除 Codex 会话 “${display}” 吗？\n\n` +
+      `确定要删除 Codex 会话 "${display}" 吗？\n\n` +
         `此操作会从 ~/.codex/sessions/ 删除原始 rollout 文件。\n\n` +
-        `建议先点 “导出” 留一份副本。\n\n确定要继续吗？`
+        `建议先点 "导出" 留一份副本。\n\n确定要继续吗？`
     );
     if (!ok) return;
     deleteCodexSessionStore(sourcePath).then((success) => {
@@ -194,12 +242,20 @@ export function Sidebar() {
     });
   }
 
+  // Group Codex sessions by originator for sub-sections.
+  const codexByOriginator = new Map<string, typeof codexSessions>();
+  for (const s of codexSessions) {
+    const key = s.originator ?? 'codex';
+    if (!codexByOriginator.has(key)) codexByOriginator.set(key, []);
+    codexByOriginator.get(key)!.push(s);
+  }
+
   return (
     <div style={{ display: 'flex', flexShrink: 0, width: sidebarWidth + 4 }}>
       <div style={{ width: sidebarWidth, borderRight: '1px solid #333', padding: 8, overflowY: 'auto', overflowX: 'hidden' }}>
         {proxyStatus && currentSession && liveSession && currentSession.id === liveSession.id && (
         <>
-          <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>● 实时捕获</div>
+          <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>{'●'} 实时捕获</div>
           <div
             style={{ padding: 6, marginBottom: 12, borderRadius: 4, background: 'rgba(129,199,132,0.1)', borderLeft: '2px solid #81c784' }}
           >
@@ -210,7 +266,7 @@ export function Sidebar() {
       )}
       {proxyStatus && (!liveSession || !currentSession || currentSession.id !== liveSession.id) && (
         <>
-          <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>● 实时捕获</div>
+          <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>{'●'} 实时捕获</div>
           <button
             onClick={() => useStore.getState().goToLive()}
             style={{ display: 'block', width: '100%', textAlign: 'left', padding: 6, marginBottom: 12, borderRadius: 4, cursor: 'pointer', background: 'rgba(129,199,132,0.08)', border: '1px solid #81c784', color: 'inherit' }}
@@ -220,47 +276,71 @@ export function Sidebar() {
           </button>
         </>
       )}
-      <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#9b8cff' }}>● 历史捕获</div>
-      {liveHistory.length === 0 && (
-        <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>暂无历史</div>
-      )}
-      {liveHistory.map((m) => (
-        <ListRow
-          key={m.path}
-          active={currentSourcePath === m.path}
-          onClick={() => openLive(m.path)}
-          menuItems={[
-            { label: '重命名', onClick: () => handleLiveRename(m.path, m.title) },
-            { label: '导出', onClick: () => handleLiveExport(m.path, m.title) },
-            { label: '删除', onClick: () => handleLiveDelete(m.path, m.title), danger: true },
-          ]}
+      <Section id="liveHistory" label="历史捕获" color="#9b8cff" count={liveHistory.length}>
+        {liveHistory.length === 0 && (
+          <div style={{ fontSize: 12, opacity: 0.5, marginBottom: 12 }}>暂无历史</div>
+        )}
+        {liveHistory.map((m) => (
+          <ListRow
+            key={m.path}
+            active={currentSourcePath === m.path}
+            onClick={() => openLive(m.path)}
+            menuItems={[
+              { label: '重命名', onClick: () => handleLiveRename(m.path, m.title) },
+              { label: '导出', onClick: () => handleLiveExport(m.path, m.title) },
+              { label: '删除', onClick: () => handleLiveDelete(m.path, m.title), danger: true },
+            ]}
+          >
+            <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }}>{m.title}</div>
+            <div style={{ fontSize: 10, opacity: 0.5 }}>{m.requestCount} 请求 · {formatTime(m.startedAt)} · {m.sizeKB}KB</div>
+          </ListRow>
+        ))}
+      </Section>
+      {(() => {
+        // Split Claude sessions by entrypoint (cli / claude-vscode /
+        // claude-desktop-3p) so the user can distinguish Claude Desktop
+        // from CLI sessions. Mirrors the Codex originator grouping.
+        const byEntrypoint = new Map<string, typeof sessions>();
+        for (const s of sessions) {
+          const key = s.entrypoint ?? 'claude-code';
+          if (!byEntrypoint.has(key)) byEntrypoint.set(key, []);
+          byEntrypoint.get(key)!.push(s);
+        }
+        return Array.from(byEntrypoint.entries()).map(([entrypoint, group]) => (
+          <Section
+            key={entrypoint}
+            id={`claude-${entrypoint}`}
+            label={ENTRYPOINT_LABELS[entrypoint] ?? entrypoint}
+            count={group.length}
+          >
+            {group.length === 0 && (
+              <div style={{ fontSize: 12, opacity: 0.5 }}>未找到会话</div>
+            )}
+            {group.map((s) => (
+              <ListRow
+                key={s.sourcePath}
+                active={currentSourcePath === s.sourcePath}
+                onClick={() => openSession(s.sourcePath)}
+                menuItems={[
+                  { label: '导出', onClick: () => handleClaudeExport(s.sourcePath, s.sessionId) },
+                  { label: '删除', onClick: () => handleClaudeDelete(s.sourcePath, s.title ?? s.sessionId), danger: true },
+                ]}
+              >
+                <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }}>{s.title ?? s.sessionId}</div>
+                <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''}</div>
+              </ListRow>
+            ))}
+          </Section>
+        ));
+      })()}
+      {Array.from(codexByOriginator.entries()).map(([originator, codexGroup]) => (
+        <Section
+          key={originator}
+          id={`codex-${originator}`}
+          label={ORIGINATOR_LABELS[originator] ?? originator}
+          count={codexGroup.length}
         >
-          <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }}>{m.title}</div>
-          <div style={{ fontSize: 10, opacity: 0.5 }}>{m.requestCount} 请求 · {formatTime(m.startedAt)} · {m.sizeKB}KB</div>
-        </ListRow>
-      ))}
-      <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, marginTop: 4 }}>Claude Code 会话</div>
-      {sessions.length === 0 && (
-        <div style={{ fontSize: 12, opacity: 0.5 }}>未找到会话</div>
-      )}
-      {sessions.map((s) => (
-        <ListRow
-          key={s.sourcePath}
-          active={currentSourcePath === s.sourcePath}
-          onClick={() => openSession(s.sourcePath)}
-          menuItems={[
-            { label: '导出', onClick: () => handleClaudeExport(s.sourcePath, s.sessionId) },
-            { label: '删除', onClick: () => handleClaudeDelete(s.sourcePath, s.title ?? s.sessionId), danger: true },
-          ]}
-        >
-          <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }}>{s.title ?? s.sessionId}</div>
-          <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''}</div>
-        </ListRow>
-      ))}
-      {codexSessions.length > 0 && (
-        <>
-          <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, marginTop: 4 }}>Codex 会话</div>
-          {codexSessions.map((s) => (
+          {codexGroup.map((s) => (
             <ListRow
               key={s.sourcePath}
               active={currentSourcePath === s.sourcePath}
@@ -271,11 +351,11 @@ export function Sidebar() {
               ]}
             >
               <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }}>{s.title ?? s.sessionId}</div>
-              <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''} {s.originator ? `· ${s.originator}` : ''}</div>
+              <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''}</div>
             </ListRow>
           ))}
-        </>
-      )}
+        </Section>
+      ))}
       </div>
       <div
         onMouseDown={startSidebarResize}
