@@ -169,10 +169,44 @@ export function loadCodexSession(path: string): Session {
       continue;
     }
 
+    // turn_context and world_state carry workspace/shell metadata but no
+    // conversation content - skip them without failing.
+    if (obj.type === 'turn_context' || obj.type === 'world_state') {
+      continue;
+    }
+
     if (obj.type === 'event_msg') {
       const p = obj.payload;
       if (p.type === 'token_count' && p.info) {
-        lastTokenUsage = p.info.total_token_usage ?? p.info.last_token_usage;
+        // token_count arrives at the END of the turn (after the assistant
+        // response), so retroactively apply usage to the most recent request.
+        const u = p.info.total_token_usage ?? p.info.last_token_usage;
+        if (u && requests.length > 0) {
+          const lastReq = requests[requests.length - 1];
+          if (lastReq.response) {
+            lastReq.response.usage = {
+              inputTokens: Number(u.input_tokens) || 0,
+              outputTokens: Number(u.output_tokens) || 0,
+              cacheReadTokens: Number(u.cached_input_tokens) || 0,
+              cacheCreationTokens: Number(u.cache_write_input_tokens) || 0,
+              model: lastReq.response.usage.model,
+              messageId: lastReq.response.usage.messageId,
+            };
+          }
+        }
+        // Also update the assistant message's meta.outputTokens
+        if (u && conversation.length > 0) {
+          for (let i = conversation.length - 1; i >= 0; i--) {
+            if (conversation[i].role === 'assistant') {
+              conversation[i].meta = {
+                ...conversation[i].meta,
+                outputTokens: Number(u.output_tokens) || undefined,
+              };
+              break;
+            }
+          }
+        }
+        lastTokenUsage = u;
       }
       continue;
     }

@@ -33,16 +33,19 @@ export function accumulateOpenaiResponsesSse(
   let currentText = '';
   let hasText = false;
 
-  // Track function call arguments by item index
-  const functionCallArgs = new Map<number, { id: string; name: string; args: string }>();
+  // Track function call arguments by call_id (stable across events even
+  // if output_index is missing or duplicated).
+  const functionCallArgs = new Map<string, { id: string; name: string; args: string }>();
 
   for (const evt of events) {
     const type: string = evt.type ?? '';
 
     if (type === 'response.created' || type === 'response.in_progress') {
       sawResponse = true;
-      if (evt.response?.model) usage.model = evt.response.model;
-      if (evt.response?.id) usage.messageId = evt.response.id;
+      // Keep the first non-null value - don't let a later event with an
+      // empty id/model overwrite a good one.
+      if (evt.response?.model && !usage.model) usage.model = evt.response.model;
+      if (evt.response?.id && !usage.messageId) usage.messageId = evt.response.id;
       continue;
     }
 
@@ -54,9 +57,13 @@ export function accumulateOpenaiResponsesSse(
         currentText = '';
         hasText = false;
       } else if (item.type === 'function_call') {
-        const idx = evt.output_index ?? 0;
-        functionCallArgs.set(idx, {
-          id: item.call_id ?? item.id ?? '',
+        const key = item.call_id ?? item.id ?? '';
+        if (!key) {
+          console.warn('[sse] function_call without call_id/item.id, skipping');
+          continue;
+        }
+        functionCallArgs.set(key, {
+          id: key,
           name: item.name ?? '',
           args: '',
         });
@@ -81,20 +88,21 @@ export function accumulateOpenaiResponsesSse(
     }
 
     if (type === 'response.function_call_arguments.delta') {
-      const idx = evt.output_index ?? 0;
-      const fc = functionCallArgs.get(idx);
+      // Match by item reference if available, else by output_index -> call_id lookup
+      const itemId = evt.item?.call_id ?? evt.item?.id;
+      const fc = itemId ? functionCallArgs.get(itemId) : null;
       if (fc) fc.args += evt.delta ?? '';
       continue;
     }
 
     if (type === 'response.function_call_arguments.done') {
-      const idx = evt.output_index ?? 0;
-      const fc = functionCallArgs.get(idx);
+      const itemId = evt.item?.call_id ?? evt.item?.id;
+      const fc = itemId ? functionCallArgs.get(itemId) : null;
       if (fc) {
         let input: unknown;
         try { input = JSON.parse(fc.args || '{}'); } catch { input = {}; }
         content.push({ type: 'tool_use', id: fc.id, name: fc.name, input });
-        functionCallArgs.delete(idx);
+        functionCallArgs.delete(itemId!);
       }
       continue;
     }
