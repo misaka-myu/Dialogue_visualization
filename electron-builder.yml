@@ -9,3 +9,11 @@ linux:
   target:
     - AppImage
     - deb
+# Stable installer filenames so the GitHub Actions upload-artifact glob
+# (and the final release-asset layout) can rely on a fixed pattern instead
+# of the version-dependent default ("DialogueViz Setup 0.5.0.exe").
+# NSIS targets ignore the root artifactName; it must be set under `win:`.
+win:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+mac:
+  artifactName: ${productName}-${version}-${arch}.${ext}
