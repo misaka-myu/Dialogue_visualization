@@ -95,3 +95,96 @@ export function normalizeAnthropicResponse(body: RawBlock): ApiResponse {
     },
   };
 }
+
+// --- OpenAI Responses API normalizers ---
+
+/** Normalize the `input` array of an OpenAI Responses request body into
+ *  our Message[] shape. The Responses API uses `input` (not `messages`)
+ *  where each item has a `role` and `content` array with type
+ *  `input_text` / `output_text` / etc. */
+function normalizeOpenaiInput(input: unknown): Message[] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((item: RawBlock): Message | null => {
+      if (!item || typeof item !== 'object') return null;
+      const role = item.role === 'assistant' ? 'assistant'
+        : item.role === 'user' ? 'user'
+        : item.role === 'developer' || item.role === 'system' ? 'system'
+        : null;
+      if (!role) return null;
+      const blocks = (item.content as RawBlock[])
+        ? normalizeCodexContentBlocks(item.content)
+        : [];
+      return { role, content: blocks };
+    })
+    .filter((m): m is Message => m !== null);
+}
+
+function normalizeCodexContentBlocks(content: unknown): ContentBlock[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .map((b: RawBlock): ContentBlock | null => {
+      if (!b || typeof b !== 'object') return null;
+      switch (b.type) {
+        case 'input_text':
+        case 'output_text':
+          return { type: 'text', text: b.text ?? '' };
+        case 'reasoning':
+        case 'reasoning_text':
+          return { type: 'thinking', thinking: b.text ?? b.summary ?? '' };
+        default:
+          return null;
+      }
+    })
+    .filter((b): b is ContentBlock => b !== null);
+}
+
+/** Normalize an OpenAI Responses API request body (POST /v1/responses)
+ *  into our ApiRequest shape. */
+export function normalizeOpenaiResponsesRequest(body: RawBlock, timestamp: number, id: string): ApiRequest {
+  const inputMessages = normalizeOpenaiInput(body.input);
+  return {
+    id,
+    apiRequestId: body.id ?? body.previous_response_id,
+    timestamp,
+    model: body.model ?? '',
+    system: body.instructions ? [{ type: 'text', text: body.instructions }] : [],
+    messageCount: inputMessages.length,
+    params: {
+      maxTokens: body.max_output_tokens ?? 0,
+      temperature: body.temperature,
+      topP: body.top_p,
+    },
+    metadata: body.metadata,
+    inputMessages,
+  };
+}
+
+/** Normalize a non-streaming OpenAI Responses API response body into our
+ *  ApiResponse shape. For streaming, use accumulateOpenaiResponsesSse. */
+export function normalizeOpenaiResponsesResponse(body: RawBlock): ApiResponse {
+  const usage = body.usage ?? {};
+  const content: ContentBlock[] = [];
+  const output = Array.isArray(body.output) ? body.output : [];
+  for (const item of output) {
+    if (item.type === 'message') {
+      content.push(...normalizeCodexContentBlocks(item.content));
+    } else if (item.type === 'function_call') {
+      let input: unknown;
+      try { input = JSON.parse(item.arguments ?? '{}'); } catch { input = {}; }
+      content.push({ type: 'tool_use', id: item.call_id ?? item.id ?? '', name: item.name ?? '', input });
+    }
+  }
+  return {
+    content,
+    stopReason: body.status ?? '',
+    usage: {
+      inputTokens: usage.input_tokens ?? 0,
+      outputTokens: usage.output_tokens ?? 0,
+      cacheReadTokens: usage.input_tokens_details?.cached_tokens ?? 0,
+      cacheCreationTokens: 0,
+      model: body.model,
+      messageId: body.id,
+    },
+  };
+}
