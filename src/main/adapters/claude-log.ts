@@ -15,6 +15,9 @@ export interface SessionMeta {
   createdAt?: number;
   lastActiveAt?: number;
   sourcePath: string;
+  /** How the session was launched: "cli", "claude-vscode", "claude-desktop-3p", etc.
+   *  Used to group sessions by source in the sidebar. */
+  entrypoint?: string;
 }
 
 export function scanClaudeSessions(rootDir: string): SessionMeta[] {
@@ -81,6 +84,7 @@ export function parseSessionMeta(path: string): SessionMeta | null {
   let projectDir: string | undefined;
   let createdAt: number | undefined;
   let firstUserMessage: string | undefined;
+  let entrypoint: string | undefined;
 
   for (const line of head) {
     let obj: any;
@@ -88,6 +92,7 @@ export function parseSessionMeta(path: string): SessionMeta | null {
     if (sessionId === undefined && typeof obj.sessionId === 'string') sessionId = obj.sessionId;
     if (projectDir === undefined && typeof obj.cwd === 'string') projectDir = obj.cwd;
     if (createdAt === undefined) createdAt = parseTimestampToMs(obj.timestamp);
+    if (entrypoint === undefined && typeof obj.entrypoint === 'string') entrypoint = obj.entrypoint;
     if (firstUserMessage === undefined) {
       const isUser = obj.type === 'user' || obj.message?.role === 'user';
       if (isUser) {
@@ -98,7 +103,7 @@ export function parseSessionMeta(path: string): SessionMeta | null {
         }
       }
     }
-    if (sessionId && projectDir && createdAt && firstUserMessage) break;
+    if (sessionId && projectDir && createdAt && firstUserMessage && entrypoint) break;
   }
 
   let lastActiveAt: number | undefined;
@@ -116,7 +121,7 @@ export function parseSessionMeta(path: string): SessionMeta | null {
     ? truncate(firstUserMessage, TITLE_MAX_CHARS)
     : projectDir ? basename(projectDir) : undefined;
 
-  return { sessionId, title, projectDir, createdAt, lastActiveAt, sourcePath: path };
+  return { sessionId, title, projectDir, createdAt, lastActiveAt, sourcePath: path, entrypoint };
 }
 
 function extractText(content: unknown): string {

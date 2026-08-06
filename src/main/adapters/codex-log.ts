@@ -2,10 +2,14 @@
 // Adapter for OpenAI Codex CLI / Codex Desktop session rollouts.
 //
 // Codex stores sessions as JSONL in ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
-// with an index at ~/.codex/session_index.jsonl. Each line is
-// {timestamp, type, payload} where type is session_meta | event_msg |
+// (and ~/.codex/archived_sessions/) with an index at ~/.codex/session_index.jsonl.
+// Each line is {timestamp, type, payload} where type is session_meta | event_msg |
 // response_item | turn_context | world_state. We normalize response_items
 // (message / function_call / function_call_output) into our Session shape.
+//
+// Discovery strategy mirrors cc-switch: walk the sessions/ directory tree
+// first (so we catch files not in the index), then overlay thread titles from
+// session_index.jsonl.
 
 import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs';
 import { dirname, join, basename } from 'path';
@@ -21,6 +25,7 @@ export interface CodexSessionMeta {
   lastActiveAt?: number;
   sourcePath: string;
   originator?: string;
+  archived?: boolean;
 }
 
 interface CodexLine {
@@ -29,12 +34,31 @@ interface CodexLine {
   payload: Record<string, any>;
 }
 
-/** Scan ~/.codex/session_index.jsonl for session metadata. Falls back to
- *  a recursive directory walk if the index is missing. */
+/** Scan ~/.codex/sessions/ + ~/.codex/archived_sessions/ for rollout files,
+ *  then overlay thread titles from session_index.jsonl. Mirrors cc-switch's
+ *  directory-walk-first approach. */
 export function scanCodexSessions(codexHome: string): CodexSessionMeta[] {
-  const indexPath = join(codexHome, 'session_index.jsonl');
-  const sessions: CodexSessionMeta[] = [];
+  // Step 1: Walk both sessions/ and archived_sessions/ directories.
+  const files: string[] = [];
+  for (const sub of ['sessions', 'archived_sessions']) {
+    const dir = join(codexHome, sub);
+    if (existsSync(dir)) {
+      files.push(...collectRolloutFiles(dir));
+    }
+  }
 
+  // Step 2: Quick-parse each file for session metadata (head only).
+  const sessions: CodexSessionMeta[] = [];
+  const byId = new Map<string, CodexSessionMeta>();
+  for (const path of files) {
+    const meta = quickParseCodexMeta(path);
+    if (!meta) continue;
+    sessions.push(meta);
+    byId.set(meta.sessionId, meta);
+  }
+
+  // Step 3: Overlay thread titles from session_index.jsonl.
+  const indexPath = join(codexHome, 'session_index.jsonl');
   if (existsSync(indexPath)) {
     try {
       const text = readFileSync(indexPath, 'utf-8');
@@ -44,42 +68,20 @@ export function scanCodexSessions(codexHome: string): CodexSessionMeta[] {
         let obj: { id: string; thread_name?: string; updated_at?: string };
         try { obj = JSON.parse(trimmed); } catch { continue; }
         if (!obj.id) continue;
-        const path = findRolloutPath(codexHome, obj.id);
-        if (!path) continue;
-        const updated = obj.updated_at ? Date.parse(obj.updated_at) : undefined;
-        sessions.push({
-          sessionId: obj.id,
-          title: obj.thread_name?.slice(0, TITLE_MAX_CHARS),
-          lastActiveAt: Number.isFinite(updated) ? updated : undefined,
-          sourcePath: path,
-        });
+        const existing = byId.get(obj.id);
+        if (existing) {
+          if (obj.thread_name) existing.title = obj.thread_name.slice(0, TITLE_MAX_CHARS);
+          if (obj.updated_at) {
+            const ts = Date.parse(obj.updated_at);
+            if (Number.isFinite(ts)) existing.lastActiveAt = ts;
+          }
+        }
       }
-    } catch { /* fall through to dir walk */ }
-  }
-
-  // Fallback: walk sessions/ directory for rollout files not in the index.
-  if (sessions.length === 0) {
-    const sessionsDir = join(codexHome, 'sessions');
-    if (existsSync(sessionsDir)) {
-      const files = collectRolloutFiles(sessionsDir);
-      for (const path of files) {
-        const meta = quickParseCodexMeta(path);
-        if (meta) sessions.push(meta);
-      }
-    }
+    } catch { /* ignore */ }
   }
 
   sessions.sort((a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0));
   return sessions;
-}
-
-/** Find the rollout file for a session id by walking sessions/YYYY/MM/DD/. */
-function findRolloutPath(codexHome: string, sessionId: string): string | null {
-  const sessionsDir = join(codexHome, 'sessions');
-  if (!existsSync(sessionsDir)) return null;
-  // The filename pattern is rollout-<ISO>-<sessionId>.jsonl
-  const files = collectRolloutFiles(sessionsDir);
-  return files.find((f) => f.includes(sessionId)) ?? null;
 }
 
 function collectRolloutFiles(dir: string): string[] {
@@ -99,29 +101,56 @@ function collectRolloutFiles(dir: string): string[] {
   return results;
 }
 
-/** Quick-parse the first few lines of a rollout to get session metadata. */
+/** Quick-parse the first few lines of a rollout to get session metadata.
+ *  Skips subagent sessions (payload.source.subagent present). */
 function quickParseCodexMeta(path: string): CodexSessionMeta | null {
   try {
     const text = readFileSync(path, 'utf-8');
-    const lines = text.split('\n').filter((l) => l.trim()).slice(0, 5);
+    const lines = text.split('\n').filter((l) => l.trim()).slice(0, 10);
+    const isArchived = path.includes('archived_sessions');
     for (const line of lines) {
       let obj: CodexLine;
       try { obj = JSON.parse(line); } catch { continue; }
       if (obj.type === 'session_meta') {
         const p = obj.payload;
+        // Skip subagent sessions (cc-switch does the same).
+        if (p.source?.subagent) return null;
         return {
           sessionId: p.session_id ?? p.id ?? basename(path, '.jsonl'),
-          title: p.base_instructions?.text?.slice(0, TITLE_MAX_CHARS),
+          title: deriveTitleFromHead(lines),
           projectDir: p.cwd,
           createdAt: p.timestamp ? Date.parse(p.timestamp) : undefined,
           lastActiveAt: p.timestamp ? Date.parse(p.timestamp) : undefined,
           sourcePath: path,
           originator: p.originator,
+          archived: isArchived,
         };
       }
     }
   } catch { /* ignore */ }
   return null;
+}
+
+/** Try to extract a title from the first real user message in the head lines. */
+function deriveTitleFromHead(lines: string[]): string | undefined {
+  for (const line of lines) {
+    let obj: CodexLine;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (obj.type !== 'response_item') continue;
+    const p = obj.payload;
+    if (p.type !== 'message' || p.role !== 'user') continue;
+    if (!Array.isArray(p.content)) continue;
+    for (const b of p.content) {
+      if (b.type === 'input_text' && b.text?.trim()) {
+        // Skip IDE context injections (cc-switch does the same).
+        if (b.text.startsWith('# Context from my IDE setup:')) continue;
+        if (b.text.startsWith('<environment_context>')) continue;
+        if (b.text.startsWith('# AGENTS.md instructions for')) continue;
+        return b.text.slice(0, TITLE_MAX_CHARS).replace(/\n/g, ' ');
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Full-parse a Codex rollout JSONL into a Session. */
@@ -139,10 +168,10 @@ export function loadCodexSession(path: string): Session {
   let lastTs: number | undefined;
   let originator: string | undefined;
   let model: string | undefined;
-  let lastTokenUsage: Record<string, any> | undefined;
 
-  // Track function_call id -> {name, input} for matching function_call_output
-  const pendingToolCalls = new Map<string, { id: string; name: string; input: unknown }>();
+  // Pending reasoning text, to be attached to the NEXT assistant message
+  // (Codex emits reasoning BEFORE the assistant response_item).
+  let pendingReasoning: string | null = null;
 
   for (const line of lines) {
     let obj: CodexLine;
@@ -163,9 +192,6 @@ export function loadCodexSession(path: string): Session {
       if (p.base_instructions?.text) {
         systemBlocks = [{ type: 'text', text: p.base_instructions.text }];
       }
-      if (p.git) {
-        // We'll attach git to messages via meta
-      }
       continue;
     }
 
@@ -178,8 +204,6 @@ export function loadCodexSession(path: string): Session {
     if (obj.type === 'event_msg') {
       const p = obj.payload;
       if (p.type === 'token_count' && p.info) {
-        // token_count arrives at the END of the turn (after the assistant
-        // response), so retroactively apply usage to the most recent request.
         const u = p.info.total_token_usage ?? p.info.last_token_usage;
         if (u && requests.length > 0) {
           const lastReq = requests[requests.length - 1];
@@ -194,7 +218,6 @@ export function loadCodexSession(path: string): Session {
             };
           }
         }
-        // Also update the assistant message's meta.outputTokens
         if (u && conversation.length > 0) {
           for (let i = conversation.length - 1; i >= 0; i--) {
             if (conversation[i].role === 'assistant') {
@@ -206,7 +229,6 @@ export function loadCodexSession(path: string): Session {
             }
           }
         }
-        lastTokenUsage = u;
       }
       continue;
     }
@@ -221,18 +243,23 @@ export function loadCodexSession(path: string): Session {
       if (!role) continue;
       const blocks = normalizeCodexContent(p.content);
       if (blocks.length === 0) continue;
+
+      // If this is an assistant message and we have pending reasoning,
+      // prepend it as a thinking block.
+      if (role === 'assistant' && pendingReasoning) {
+        blocks.unshift({ type: 'thinking', thinking: pendingReasoning });
+        pendingReasoning = null;
+      }
+
       const meta: MessageMeta = {
         timestamp: itemTs,
         model,
         originator,
       };
-      // Attach git branch if available from session_meta
       conversation.push({ role, content: blocks, meta });
 
       if (role === 'assistant') {
-        // Create an ApiRequest for this assistant turn
         const reqId = `${sessionId ?? 'codex'}-${requests.length}`;
-        const u = lastTokenUsage ?? {};
         requests.push({
           id: reqId,
           timestamp: itemTs ?? lastTs ?? Date.now(),
@@ -244,33 +271,27 @@ export function loadCodexSession(path: string): Session {
             content: blocks,
             stopReason: '',
             usage: {
-              inputTokens: Number(u.input_tokens) || 0,
-              outputTokens: Number(u.output_tokens) || 0,
-              cacheReadTokens: Number(u.cached_input_tokens) || 0,
-              cacheCreationTokens: Number(u.cache_write_input_tokens) || 0,
+              inputTokens: 0,
+              outputTokens: 0,
+              cacheReadTokens: 0,
+              cacheCreationTokens: 0,
               model,
               messageId: p.id,
             },
           },
         });
-        lastTokenUsage = undefined; // reset for next turn
       }
       continue;
     }
 
     if (p.type === 'function_call') {
-      // Tool call - attach as tool_use block to the last assistant message,
-      // or create a synthetic assistant message if none exists.
       let input: unknown;
       try { input = JSON.parse(p.arguments ?? '{}'); } catch { input = {}; }
       const callId = p.call_id ?? p.id;
-      pendingToolCalls.set(callId, { id: callId, name: p.name, input });
-      // Append tool_use to last assistant message, or push as a tool role
       const lastMsg = conversation[conversation.length - 1];
       if (lastMsg && lastMsg.role === 'assistant') {
         lastMsg.content.push({ type: 'tool_use', id: callId, name: p.name, input });
       } else {
-        // Standalone tool_use (no preceding assistant text) - push as assistant
         conversation.push({
           role: 'assistant',
           content: [{ type: 'tool_use', id: callId, name: p.name, input }],
@@ -281,12 +302,10 @@ export function loadCodexSession(path: string): Session {
     }
 
     if (p.type === 'function_call_output') {
-      // Tool result
       const callId = p.call_id;
       const output = typeof p.output === 'string' ? p.output : JSON.stringify(p.output ?? '');
       const lastMsg = conversation[conversation.length - 1];
       if (lastMsg && lastMsg.role === 'user') {
-        // Codex sometimes batches tool results as user messages; append
         lastMsg.content.push({ type: 'tool_result', toolUseId: callId, content: output });
       } else {
         conversation.push({
@@ -298,13 +317,20 @@ export function loadCodexSession(path: string): Session {
       continue;
     }
 
+    // Reasoning items arrive BEFORE the assistant message. Buffer the text
+    // and attach it to the next assistant message (handled above).
+    // Cap at 1MB to prevent pathological sessions from consuming memory.
     if (p.type === 'reasoning') {
-      // Reasoning item - attach as thinking block to last assistant or skip
-      const text = p.summary ?? p.content ?? '';
-      if (text) {
-        const lastMsg = conversation[conversation.length - 1];
-        if (lastMsg && lastMsg.role === 'assistant') {
-          lastMsg.content.unshift({ type: 'thinking', thinking: typeof text === 'string' ? text : JSON.stringify(text) });
+      const reasoningText = extractReasoningText(p);
+      if (reasoningText) {
+        const MAX_REASONING = 1_000_000;
+        if (pendingReasoning) {
+          const combined: string = pendingReasoning + '\n' + reasoningText;
+          pendingReasoning = combined.length > MAX_REASONING
+            ? combined.slice(-MAX_REASONING)
+            : combined;
+        } else {
+          pendingReasoning = reasoningText.slice(0, MAX_REASONING);
         }
       }
       continue;
@@ -363,12 +389,32 @@ function normalizeCodexContent(content: unknown): ContentBlock[] {
   }).filter((b): b is ContentBlock => b !== null);
 }
 
+/** Extract text from a reasoning response_item payload. The content can be
+ *  either an array of {type: "reasoning_text", text} blocks or a plain string. */
+function extractReasoningText(p: Record<string, any>): string | null {
+  if (typeof p.summary === 'string' && p.summary.trim()) return p.summary;
+  if (Array.isArray(p.content)) {
+    const texts = p.content
+      .filter((b: any) => b.type === 'reasoning_text' || b.type === 'text')
+      .map((b: any) => b.text ?? b.summary ?? '')
+      .filter((t: string) => t.trim());
+    if (texts.length) return texts.join('\n');
+  }
+  if (typeof p.content === 'string' && p.content.trim()) return p.content;
+  return null;
+}
+
 function deriveTitle(conversation: Message[]): string | undefined {
   for (const m of conversation) {
     if (m.role === 'user') {
       for (const b of m.content) {
         if (b.type === 'text' && b.text.trim()) {
-          return b.text.slice(0, TITLE_MAX_CHARS).replace(/\n/g, ' ');
+          const t = b.text.trim();
+          // Skip IDE context injections.
+          if (t.startsWith('# Context from my IDE setup:')) continue;
+          if (t.startsWith('<environment_context>')) continue;
+          if (t.startsWith('# AGENTS.md instructions for')) continue;
+          return t.slice(0, TITLE_MAX_CHARS).replace(/\n/g, ' ');
         }
       }
     }
