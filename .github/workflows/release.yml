@@ -52,6 +52,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # checkout is needed so `git archive` can find the tag's tree for
+      # the source tarball/zip attachments.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
