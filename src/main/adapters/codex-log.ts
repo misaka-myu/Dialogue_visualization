@@ -319,12 +319,19 @@ export function loadCodexSession(path: string): Session {
 
     // Reasoning items arrive BEFORE the assistant message. Buffer the text
     // and attach it to the next assistant message (handled above).
+    // Cap at 1MB to prevent pathological sessions from consuming memory.
     if (p.type === 'reasoning') {
       const reasoningText = extractReasoningText(p);
       if (reasoningText) {
-        pendingReasoning = pendingReasoning
-          ? pendingReasoning + '\n' + reasoningText
-          : reasoningText;
+        const MAX_REASONING = 1_000_000;
+        if (pendingReasoning) {
+          const combined: string = pendingReasoning + '\n' + reasoningText;
+          pendingReasoning = combined.length > MAX_REASONING
+            ? combined.slice(-MAX_REASONING)
+            : combined;
+        } else {
+          pendingReasoning = reasoningText.slice(0, MAX_REASONING);
+        }
       }
       continue;
     }

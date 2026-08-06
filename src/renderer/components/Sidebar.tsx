@@ -12,6 +12,12 @@ function formatTime(ts: number): string {
 
 const SECTION_STORAGE_KEY = 'dialogueviz.sidebar.collapsed';
 
+/** Prefix for section IDs within the collapsed-state JSON, so IDs like
+ *  "liveHistory" or "claude-cli" can't collide with future keys. */
+function sectionKey(id: string): string {
+  return `section.${id}`;
+}
+
 /** Collapsible section: header (click to toggle) + children (hidden when
  *  collapsed). State persists to localStorage keyed by `id`. */
 function Section({ id, label, color, count, children }: {
@@ -20,7 +26,7 @@ function Section({ id, label, color, count, children }: {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || '{}');
-      return stored[id] === true;
+      return stored[sectionKey(id)] === true;
     } catch { return false; }
   });
   const toggle = () => {
@@ -28,7 +34,7 @@ function Section({ id, label, color, count, children }: {
     setCollapsed(next);
     try {
       const stored = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || '{}');
-      stored[id] = next;
+      stored[sectionKey(id)] = next;
       localStorage.setItem(SECTION_STORAGE_KEY, JSON.stringify(stored));
     } catch { /* ignore */ }
   };
