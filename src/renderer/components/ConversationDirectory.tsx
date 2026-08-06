@@ -9,6 +9,7 @@ import { useStore } from '../store';
 import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
 import { copyMessageText, copyMessageJson } from '../utils/messageCopy';
 import { getVirtuosoRef } from '../hooks/virtuosoRef';
+import { useResizable } from '../hooks/useResizable';
 import type { Message } from '../../main/model/types';
 
 interface RoleStyle {
@@ -201,35 +202,92 @@ export function ConversationDirectory() {
   const session = useStore((s) => s.currentSession);
   const activeIndex = useStore((s) => s.activeDirectoryIndex);
   const messages = session?.conversation ?? [];
+  const directoryWidth = useStore((s) => s.directoryWidth);
+  const setDirectoryWidth = useStore((s) => s.setDirectoryWidth);
+  const [isHandleHover, setIsHandleHover] = useState(false);
+
+  const startDirectoryResize = useResizable({
+    side: 'right',
+    minWidth: 160,
+    maxWidth: 480,
+    storageKey: 'dialogueviz.directory.width',
+    getWidth: () => useStore.getState().directoryWidth,
+    onWidthChange: setDirectoryWidth,
+  });
 
   if (!session) {
     return (
-      <div style={{ width: 240, background: '#1e1e1e', borderLeft: '1px solid #333', padding: 12, fontSize: 12, opacity: 0.5 }}>
-        从左侧选择一个会话
+      <div style={{ display: 'flex', flexShrink: 0, width: directoryWidth + 4 }}>
+        <div
+          onMouseDown={startDirectoryResize}
+          onMouseEnter={() => setIsHandleHover(true)}
+          onMouseLeave={() => setIsHandleHover(false)}
+          title="拖动调整目录宽度"
+          style={{
+            width: 4,
+            cursor: 'col-resize',
+            background: isHandleHover ? '#666' : 'transparent',
+            transition: 'background 0.15s',
+            flexShrink: 0,
+          }}
+        />
+        <div style={{ width: directoryWidth, background: '#1e1e1e', borderLeft: '1px solid #333', padding: 12, fontSize: 12, opacity: 0.5 }}>
+          从左侧选择一个会话
+        </div>
       </div>
     );
   }
   if (messages.length === 0) {
     return (
-      <div style={{ width: 240, background: '#1e1e1e', borderLeft: '1px solid #333', padding: 12, fontSize: 12, opacity: 0.5 }}>
-        无对话
+      <div style={{ display: 'flex', flexShrink: 0, width: directoryWidth + 4 }}>
+        <div
+          onMouseDown={startDirectoryResize}
+          onMouseEnter={() => setIsHandleHover(true)}
+          onMouseLeave={() => setIsHandleHover(false)}
+          title="拖动调整目录宽度"
+          style={{
+            width: 4,
+            cursor: 'col-resize',
+            background: isHandleHover ? '#666' : 'transparent',
+            transition: 'background 0.15s',
+            flexShrink: 0,
+          }}
+        />
+        <div style={{ width: directoryWidth, background: '#1e1e1e', borderLeft: '1px solid #333', padding: 12, fontSize: 12, opacity: 0.5 }}>
+          无对话
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ width: 240, background: '#1e1e1e', borderLeft: '1px solid #333', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: '6px 12px', borderBottom: '1px solid #333', fontSize: 11, opacity: 0.7 }}>
-        对话目录 · {messages.length} 条
-      </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <Virtuoso
-          data={messages}
-          itemContent={(index, m) => (
-            <Row message={m} index={index} active={activeIndex === index} />
-          )}
-          style={{ height: '100%' }}
-        />
+    <div style={{ display: 'flex', flexShrink: 0, width: directoryWidth + 4 }}>
+      <div
+        onMouseDown={startDirectoryResize}
+        onMouseEnter={() => setIsHandleHover(true)}
+        onMouseLeave={() => setIsHandleHover(false)}
+        title="拖动调整目录宽度"
+        style={{
+          width: 4,
+          cursor: 'col-resize',
+          background: isHandleHover ? '#666' : 'transparent',
+          transition: 'background 0.15s',
+          flexShrink: 0,
+        }}
+      />
+      <div style={{ width: directoryWidth, background: '#1e1e1e', borderLeft: '1px solid #333', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ padding: '6px 12px', borderBottom: '1px solid #333', fontSize: 11, opacity: 0.7 }}>
+          对话目录 · {messages.length} 条
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <Virtuoso
+            data={messages}
+            itemContent={(index, m) => (
+              <Row message={m} index={index} active={activeIndex === index} />
+            )}
+            style={{ height: '100%' }}
+          />
+        </div>
       </div>
     </div>
   );

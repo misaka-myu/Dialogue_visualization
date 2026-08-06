@@ -32,6 +32,12 @@ interface State {
   /** Transient status banner message. The Toast component auto-clears it
    *  after a short delay so callers can fire-and-forget. */
   toast: string | null;
+  /** Pixel width of the left sidebar column. Mirrored to localStorage by
+   *  the hook that owns the drag interaction. */
+  sidebarWidth: number;
+  /** Pixel width of the right conversation-directory column (when open).
+   *  Same persistence story as sidebarWidth. */
+  directoryWidth: number;
   setSessions: (s: SessionMeta[]) => void;
   setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
@@ -41,6 +47,8 @@ interface State {
   setDirectoryOpen: (open: boolean) => void;
   setActiveDirectoryIndex: (i: number | null) => void;
   setToast: (message: string | null) => void;
+  setSidebarWidth: (w: number) => void;
+  setDirectoryWidth: (w: number) => void;
   refreshSessions: () => Promise<void>;
   refreshLiveHistory: () => Promise<void>;
   openSession: (sourcePath: string) => Promise<void>;
@@ -67,6 +75,20 @@ function deriveMessages(session: Session | null, request: ApiRequest | null): Me
   return session.conversation.slice(0, request.messageCount);
 }
 
+/** Read a persisted width out of localStorage at store-initialization time
+ *  so the first paint already has the correct value (no hydration flash).
+ *  Falls back to `fallback` on missing/corrupt storage. */
+function loadStoredWidth(storageKey: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw !== null) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) return Math.max(min, Math.min(max, n));
+    }
+  } catch { /* localStorage unavailable */ }
+  return fallback;
+}
+
 export const useStore = create<State>((set, get) => ({
   sessions: [],
   liveHistory: [],
@@ -81,6 +103,8 @@ export const useStore = create<State>((set, get) => ({
   directoryOpen: true,
   activeDirectoryIndex: null,
   toast: null,
+  sidebarWidth: loadStoredWidth('dialogueviz.sidebar.width', 240, 160, 480),
+  directoryWidth: loadStoredWidth('dialogueviz.directory.width', 240, 160, 480),
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
   setCurrentSession: (s) => {
@@ -109,6 +133,8 @@ export const useStore = create<State>((set, get) => ({
   setDirectoryOpen: (open) => set({ directoryOpen: open }),
   setActiveDirectoryIndex: (i) => set({ activeDirectoryIndex: i }),
   setToast: (message) => set({ toast: message }),
+  setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
+  setDirectoryWidth: (directoryWidth) => set({ directoryWidth }),
   refreshSessions: async () => {
     const sessions = await window.api.listSessions();
     set({ sessions });

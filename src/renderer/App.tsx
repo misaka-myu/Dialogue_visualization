@@ -85,35 +85,67 @@ export function App() {
           </div>
         </div>
         {directoryOpen && <ConversationDirectory />}
-        <div
-          onClick={() => setDirectoryOpen(!directoryOpen)}
-          title={directoryOpen ? '收起对话目录' : '展开对话目录'}
-          style={{
-            width: 16,
-            background: directoryOpen ? '#1a1a1a' : '#222',
-            borderLeft: directoryOpen ? 'none' : '1px solid #333',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            color: '#888',
-            fontSize: 16,
-            fontWeight: 600,
-            userSelect: 'none',
-            flexShrink: 0,
-            transition: 'background 0.15s',
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLDivElement).style.background = '#2a2a2a';
-            (e.currentTarget as HTMLDivElement).style.color = '#ddd';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLDivElement).style.background = directoryOpen ? '#1a1a1a' : '#222';
-            (e.currentTarget as HTMLDivElement).style.color = '#888';
-          }}
-        >
-          {directoryOpen ? '›' : '‹'}
-        </div>
+        {!directoryOpen && (
+          <div
+            onClick={() => setDirectoryOpen(true)}
+            title="展开对话目录"
+            style={{
+              width: 16,
+              background: '#222',
+              borderLeft: '1px solid #333',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: '#888',
+              fontSize: 16,
+              fontWeight: 600,
+              userSelect: 'none',
+              flexShrink: 0,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLDivElement).style.background = '#2a2a2a';
+              (e.currentTarget as HTMLDivElement).style.color = '#ddd';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLDivElement).style.background = '#222';
+              (e.currentTarget as HTMLDivElement).style.color = '#888';
+            }}
+          >
+            ‹
+          </div>
+        )}
+        {directoryOpen && (
+          <div
+            onClick={() => setDirectoryOpen(false)}
+            title="收起对话目录"
+            style={{
+              width: 16,
+              background: '#1a1a1a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: '#888',
+              fontSize: 16,
+              fontWeight: 600,
+              userSelect: 'none',
+              flexShrink: 0,
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLDivElement).style.background = '#2a2a2a';
+              (e.currentTarget as HTMLDivElement).style.color = '#ddd';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLDivElement).style.background = '#1a1a1a';
+              (e.currentTarget as HTMLDivElement).style.color = '#888';
+            }}
+          >
+            ›
+          </div>
+        )}
       </div>
       <Toast />
     </>
