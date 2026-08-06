@@ -15,7 +15,7 @@ jobs:
         include:
           - os: windows-latest
             artifact_name: DialogueViz-Setup
-            artifact_glob: 'dist/DialogueViz-Setup-*.exe'
+            artifact_glob: 'dist/DialogueViz-*-x64.exe'
           - os: macos-latest
             artifact_name: DialogueViz-mac
             artifact_glob: 'dist/DialogueViz-*.dmg'
@@ -55,9 +55,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-      # Source archive of the tag's tree (tar.gz + zip — both are what
-      # GitHub would generate itself under "Source code", but doing it here
-      # gives us deterministic contents and avoids the auto-generated zip).
       - name: Create source archive
         env:
           TAG_NAME: ${{ github.ref_name }}
