@@ -14,11 +14,16 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            target: win
+            artifact_name: DialogueViz-Setup
+            artifact_glob: 'dist/DialogueViz-Setup-*.exe'
           - os: macos-latest
-            target: mac
+            artifact_name: DialogueViz-mac
+            artifact_glob: 'dist/DialogueViz-*.dmg'
           - os: ubuntu-latest
-            target: linux
+            artifact_name: DialogueViz-linux
+            artifact_glob: |
+                  dist/DialogueViz-*.AppImage
+                  dist/dialogue-viz_*.deb
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -28,8 +33,48 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx electron-builder --${{ matrix.target }} --publish onTag
+      # --publish never: build the installers but don't push to GitHub
+      # ourselves. We collect the artifacts in the next step and let the
+      # upload_release job pick which files actually go on the release.
+      # This avoids the auto-generated blockmap / latest*.yml files that
+      # electron-builder would otherwise attach.
+      - run: npx electron-builder --publish never
+        env:
+          # macOS: skip code signing (no certificate in CI).
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  upload_release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      # Source archive of the tag's tree (tar.gz + zip — both are what
+      # GitHub would generate itself under "Source code", but doing it here
+      # gives us deterministic contents and avoids the auto-generated zip).
+      - name: Create source archive
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          git archive --format=tar.gz --prefix="DialogueViz-${TAG_NAME#v}/" -o "release-assets/DialogueViz-${TAG_NAME}-source.tar.gz" "${TAG_NAME}"
+          git archive --format=zip --prefix="DialogueViz-${TAG_NAME#v}/" -o "release-assets/DialogueViz-${TAG_NAME}-source.zip" "${TAG_NAME}"
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/DialogueViz-Setup/*.exe
+            artifacts/DialogueViz-mac/*.dmg
+            artifacts/DialogueViz-linux/*.AppImage
+            artifacts/DialogueViz-linux/*.deb
+            release-assets/DialogueViz-${{ github.ref_name }}-source.tar.gz
+            release-assets/DialogueViz-${{ github.ref_name }}-source.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS: 不尝试代码签名（无证书），避免构建失败
-          CSC_IDENTITY_AUTO_DISCOVERY: false
