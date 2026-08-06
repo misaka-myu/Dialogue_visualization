@@ -75,6 +75,20 @@ function deriveMessages(session: Session | null, request: ApiRequest | null): Me
   return session.conversation.slice(0, request.messageCount);
 }
 
+/** Read a persisted width out of localStorage at store-initialization time
+ *  so the first paint already has the correct value (no hydration flash).
+ *  Falls back to `fallback` on missing/corrupt storage. */
+function loadStoredWidth(storageKey: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw !== null) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) return Math.max(min, Math.min(max, n));
+    }
+  } catch { /* localStorage unavailable */ }
+  return fallback;
+}
+
 export const useStore = create<State>((set, get) => ({
   sessions: [],
   liveHistory: [],
@@ -89,8 +103,8 @@ export const useStore = create<State>((set, get) => ({
   directoryOpen: true,
   activeDirectoryIndex: null,
   toast: null,
-  sidebarWidth: 240,
-  directoryWidth: 240,
+  sidebarWidth: loadStoredWidth('dialogueviz.sidebar.width', 240, 160, 480),
+  directoryWidth: loadStoredWidth('dialogueviz.directory.width', 240, 160, 480),
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
   setCurrentSession: (s) => {

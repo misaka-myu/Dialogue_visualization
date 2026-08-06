@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 import { ItemMenu, MenuItem } from './ItemMenu';
-import { useResizable, readStoredWidth } from '../hooks/useResizable';
+import { useResizable } from '../hooks/useResizable';
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -74,15 +74,6 @@ export function Sidebar() {
   const sidebarWidth = useStore((s) => s.sidebarWidth);
   const setSidebarWidth = useStore((s) => s.setSidebarWidth);
   const [isHandleHover, setIsHandleHover] = useState(false);
-
-  // Hydrate from localStorage once on mount; the hook then handles writes
-  // on each drag-end.
-  useEffect(() => {
-    const stored = readStoredWidth('dialogueviz.sidebar.width', 240);
-    const clamped = Math.max(160, Math.min(480, stored));
-    if (clamped !== sidebarWidth) setSidebarWidth(clamped);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const startSidebarResize = useResizable({
     side: 'left',

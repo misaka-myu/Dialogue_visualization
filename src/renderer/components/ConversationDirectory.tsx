@@ -9,7 +9,7 @@ import { useStore } from '../store';
 import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
 import { copyMessageText, copyMessageJson } from '../utils/messageCopy';
 import { getVirtuosoRef } from '../hooks/virtuosoRef';
-import { useResizable, readStoredWidth } from '../hooks/useResizable';
+import { useResizable } from '../hooks/useResizable';
 import type { Message } from '../../main/model/types';
 
 interface RoleStyle {
@@ -205,13 +205,6 @@ export function ConversationDirectory() {
   const directoryWidth = useStore((s) => s.directoryWidth);
   const setDirectoryWidth = useStore((s) => s.setDirectoryWidth);
   const [isHandleHover, setIsHandleHover] = useState(false);
-
-  useEffect(() => {
-    const stored = readStoredWidth('dialogueviz.directory.width', 240);
-    const clamped = Math.max(160, Math.min(480, stored));
-    if (clamped !== directoryWidth) setDirectoryWidth(clamped);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const startDirectoryResize = useResizable({
     side: 'right',
