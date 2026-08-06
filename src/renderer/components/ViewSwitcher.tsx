@@ -7,6 +7,7 @@ export function ViewSwitcher() {
   const currentSession = useStore((s) => s.currentSession);
   const proxyStatus = useStore((s) => s.proxyStatus);
   const startCapture = useStore((s) => s.startCapture);
+  const startCodexCapture = useStore((s) => s.startCodexCapture);
   const stopCapture = useStore((s) => s.stopCapture);
 
   const views: { kind: ViewKind; label: string }[] = [
@@ -58,12 +59,20 @@ export function ViewSwitcher() {
           </button>
         </>
       ) : (
-        <button
-          onClick={() => startCapture()}
-          style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(129,199,132,0.2)', border: '1px solid #444', color: 'inherit' }}
-        >
-          🔴 开始捕获
-        </button>
+        <>
+          <button
+            onClick={() => startCapture()}
+            style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(129,199,132,0.2)', border: '1px solid #444', color: 'inherit' }}
+          >
+            🔴 Claude 捕获
+          </button>
+          <button
+            onClick={() => startCodexCapture()}
+            style={{ padding: '4px 10px', borderRadius: 4, cursor: 'pointer', background: 'rgba(155,140,255,0.2)', border: '1px solid #444', color: 'inherit' }}
+          >
+            🔴 Codex 捕获
+          </button>
+        </>
       )}
       {currentSession && (
         <span style={{ marginLeft: 'auto', fontSize: 12, opacity: 0.6 }}>

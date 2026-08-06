@@ -64,12 +64,16 @@ function ListRow({
 
 export function Sidebar() {
   const sessions = useStore((s) => s.sessions);
+  const codexSessions = useStore((s) => s.codexSessions);
   const liveHistory = useStore((s) => s.liveHistory);
   const refreshSessions = useStore((s) => s.refreshSessions);
   const refreshLiveHistory = useStore((s) => s.refreshLiveHistory);
+  const refreshCodexSessions = useStore((s) => s.refreshCodexSessions);
   const openSession = useStore((s) => s.openSession);
+  const openCodexSession = useStore((s) => s.openCodexSession);
   const openLive = useStore((s) => s.openLive);
   const currentSession = useStore((s) => s.currentSession);
+  const liveSession = useStore((s) => s.liveSession);
   const proxyStatus = useStore((s) => s.proxyStatus);
   const sidebarWidth = useStore((s) => s.sidebarWidth);
   const setSidebarWidth = useStore((s) => s.setSidebarWidth);
@@ -89,12 +93,15 @@ export function Sidebar() {
   const exportLiveCapture = useStore((s) => s.exportLiveCapture);
   const deleteClaudeSession = useStore((s) => s.deleteClaudeSession);
   const exportClaudeSession = useStore((s) => s.exportClaudeSession);
+  const deleteCodexSessionStore = useStore((s) => s.deleteCodexSession);
+  const exportCodexSessionStore = useStore((s) => s.exportCodexSession);
   const pickExportPath = useStore((s) => s.pickExportPath);
 
   useEffect(() => {
     refreshSessions();
     refreshLiveHistory();
-  }, [refreshSessions, refreshLiveHistory]);
+    refreshCodexSessions();
+  }, [refreshSessions, refreshLiveHistory, refreshCodexSessions]);
 
   // A loaded-from-history session is identified by the file path; live capture
   // uses the in-memory id. The store tracks the open path explicitly.
@@ -162,10 +169,35 @@ export function Sidebar() {
     });
   }
 
+  // --- Codex action handlers ---
+  function handleCodexDelete(sourcePath: string, title: string) {
+    const display = title || sourcePath;
+    const ok = window.confirm(
+      `确定要删除 Codex 会话 “${display}” 吗？\n\n` +
+        `此操作会从 ~/.codex/sessions/ 删除原始 rollout 文件。\n\n` +
+        `建议先点 “导出” 留一份副本。\n\n确定要继续吗？`
+    );
+    if (!ok) return;
+    deleteCodexSessionStore(sourcePath).then((success) => {
+      if (!success) window.alert('删除失败，请检查文件是否被占用。');
+    });
+  }
+
+  function handleCodexExport(sourcePath: string, title: string) {
+    const safeName = (title || 'codex-session').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 80);
+    pickExportPath(`${safeName}.jsonl`).then((exportPath) => {
+      if (!exportPath) return;
+      exportCodexSessionStore(sourcePath, exportPath).then((result) => {
+        if (result === null) window.alert('导出失败，请检查目标路径。');
+        else window.alert(`已导出到：\n${result}`);
+      });
+    });
+  }
+
   return (
     <div style={{ display: 'flex', flexShrink: 0, width: sidebarWidth + 4 }}>
       <div style={{ width: sidebarWidth, borderRight: '1px solid #333', padding: 8, overflowY: 'auto', overflowX: 'hidden' }}>
-        {proxyStatus && currentSession?.source === 'proxy-live' && (
+        {proxyStatus && currentSession && liveSession && currentSession.id === liveSession.id && (
         <>
           <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>● 实时捕获</div>
           <div
@@ -176,7 +208,7 @@ export function Sidebar() {
           </div>
         </>
       )}
-      {proxyStatus && currentSession?.source !== 'proxy-live' && (
+      {proxyStatus && (!liveSession || !currentSession || currentSession.id !== liveSession.id) && (
         <>
           <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, color: '#81c784' }}>● 实时捕获</div>
           <button
@@ -225,6 +257,25 @@ export function Sidebar() {
           <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''}</div>
         </ListRow>
       ))}
+      {codexSessions.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, opacity: 0.5, textTransform: 'uppercase', marginBottom: 8, marginTop: 4 }}>Codex 会话</div>
+          {codexSessions.map((s) => (
+            <ListRow
+              key={s.sourcePath}
+              active={currentSourcePath === s.sourcePath}
+              onClick={() => openCodexSession(s.sourcePath)}
+              menuItems={[
+                { label: '导出', onClick: () => handleCodexExport(s.sourcePath, s.title ?? s.sessionId) },
+                { label: '删除', onClick: () => handleCodexDelete(s.sourcePath, s.title ?? s.sessionId), danger: true },
+              ]}
+            >
+              <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingRight: 4 }}>{s.title ?? s.sessionId}</div>
+              <div style={{ fontSize: 10, opacity: 0.5 }}>{s.projectDir ?? ''} {s.originator ? `· ${s.originator}` : ''}</div>
+            </ListRow>
+          ))}
+        </>
+      )}
       </div>
       <div
         onMouseDown={startSidebarResize}
