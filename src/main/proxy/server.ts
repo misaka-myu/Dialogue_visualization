@@ -3,9 +3,10 @@ import express from 'express';
 import { Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { ApiRequest } from '../model/types';
-import { normalizeAnthropicRequest, normalizeAnthropicResponse, normalizeMessages } from '../model/normalizer';
+import { normalizeAnthropicRequest, normalizeAnthropicResponse, normalizeMessages, normalizeOpenaiResponsesRequest, normalizeOpenaiResponsesResponse } from '../model/normalizer';
 import { detectUpstream } from './upstream';
 import { accumulateClaudeSse } from './sse';
+import { accumulateOpenaiResponsesSse } from './responses-sse';
 
 export interface ProxyServer {
   port: number;
@@ -54,6 +55,10 @@ export async function startProxyServer(
 
   app.post('/v1/messages', captureAuth, (req: express.Request, res: express.Response) => {
     void handleMessages(req, res, upstream, emitter);
+  });
+
+  app.post('/v1/responses', captureAuth, (req: express.Request, res: express.Response) => {
+    void handleResponses(req, res, upstream, emitter);
   });
 
   app.post('/v1/messages/count_tokens', (req: express.Request, res: express.Response) => {
@@ -311,6 +316,130 @@ async function passthrough(
   copyResponseHeaders(upstreamRes, res);
   const text = await upstreamRes.text();
   res.send(text);
+}
+
+// --- OpenAI Responses API handler (POST /v1/responses) ---
+
+/** Handle POST /v1/responses - the Codex capture endpoint. Mirrors
+ *  handleMessages but uses OpenAI Responses normalizers + SSE accumulator. */
+async function handleResponses(
+  req: express.Request,
+  res: express.Response,
+  upstream: string,
+  emitter: EventEmitter,
+): Promise<void> {
+  let body: Record<string, any>;
+  try {
+    body = JSON.parse((req.body as Buffer).toString('utf-8'));
+  } catch {
+    res.status(400).json({ error: 'invalid JSON body' });
+    return;
+  }
+
+  const timestamp = Date.now();
+  const apiReq = normalizeOpenaiResponsesRequest(body, timestamp, genId());
+
+  const forwardHeaders = buildForwardHeaders(req);
+  // Use the request's original path (e.g. /v1/responses) appended to the
+  // upstream origin so providers with non-standard path prefixes still work.
+  const upstreamUrl = `${upstream}${req.originalUrl}`;
+  const isStream = body.stream === true;
+
+  let upstreamRes: Response;
+  try {
+    console.log('[proxy] forwarding to:', upstreamUrl);
+    upstreamRes = await fetch(upstreamUrl, {
+      method: 'POST',
+      headers: forwardHeaders,
+      body: req.body as BodyInit,
+    });
+  } catch (err: any) {
+    const cause = err?.cause ? ` (cause: ${JSON.stringify(err.cause)})` : '';
+    console.error('[proxy] fetch failed:', err?.message, cause);
+    res.status(502).json({ error: 'proxy upstream error', detail: String(err), cause: cause || undefined });
+    return;
+  }
+
+  res.status(upstreamRes.status);
+  copyResponseHeaders(upstreamRes, res);
+
+  if (isStream) {
+    await streamAndCaptureResponses(upstreamRes, res, apiReq, emitter);
+  } else {
+    await bufferAndCaptureResponses(upstreamRes, res, apiReq, emitter);
+  }
+}
+
+/** Stream OpenAI Responses SSE chunks to the client while accumulating. */
+async function streamAndCaptureResponses(
+  upstreamRes: Response,
+  res: express.Response,
+  apiReq: ApiRequest,
+  emitter: EventEmitter,
+): Promise<void> {
+  const reader = upstreamRes.body?.getReader();
+  if (!reader) {
+    await bufferAndCaptureResponses(upstreamRes, res, apiReq, emitter);
+    return;
+  }
+
+  const rawChunks: Buffer[] = [];
+  let streamError: unknown = null;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const buf = Buffer.from(value);
+      rawChunks.push(buf);
+      if (!res.writableEnded) {
+        res.write(buf);
+      }
+    }
+  } catch (err) {
+    streamError = err;
+  } finally {
+    try { reader.releaseLock(); } catch { /* ignore */ }
+    if (!res.writableEnded) {
+      try { res.end(); } catch { /* ignore */ }
+    }
+  }
+
+  if (streamError) {
+    console.error('[proxy] responses stream read error:', streamError);
+    return;
+  }
+
+  const fullText = Buffer.concat(rawChunks).toString('utf-8');
+  const accumulated = accumulateOpenaiResponsesSse([fullText]);
+  if (accumulated) {
+    apiReq.response = {
+      content: accumulated.content,
+      stopReason: accumulated.stopReason,
+      usage: accumulated.usage,
+    };
+    emitter.emit('captured', apiReq);
+  }
+}
+
+/** Buffer the full OpenAI Responses response, capture, and send to client. */
+async function bufferAndCaptureResponses(
+  upstreamRes: Response,
+  res: express.Response,
+  apiReq: ApiRequest,
+  emitter: EventEmitter,
+): Promise<void> {
+  const text = await upstreamRes.text();
+  if (!res.writableEnded) {
+    res.send(text);
+  }
+
+  try {
+    const body = JSON.parse(text);
+    apiReq.response = normalizeOpenaiResponsesResponse(body);
+    emitter.emit('captured', apiReq);
+  } catch {
+    // Non-JSON response - don't capture.
+  }
 }
 
 /** Copy response headers from upstream to client, skipping ones that would

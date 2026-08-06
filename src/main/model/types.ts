@@ -22,6 +22,8 @@ export interface MessageMeta {
   entrypoint?: string;
   promptId?: string;
   model?: string;
+  /** For Codex sessions: the originating surface (codex_vscode / Codex Desktop). */
+  originator?: string;
   /** Real output_tokens for an assistant message (from the response usage). */
   outputTokens?: number;
 }

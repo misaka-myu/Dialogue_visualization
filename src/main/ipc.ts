@@ -1,6 +1,7 @@
 // src/main/ipc.ts
 import { ipcMain, dialog, BrowserWindow, app } from 'electron';
 import { scanClaudeSessions, loadClaudeSession, deleteClaudeSession, exportClaudeSession, SessionMeta } from './adapters/claude-log';
+import { scanCodexSessions, loadCodexSession, deleteCodexSession, exportCodexSession, CodexSessionMeta } from './adapters/codex-log';
 import { join } from 'path';
 import { homedir } from 'os';
 import { spawn } from 'child_process';
@@ -16,6 +17,43 @@ function claudeProjectsDir(): string {
 
 function claudeSettingsPath(): string {
   return join(homedir(), '.claude', 'settings.json');
+}
+
+function codexHome(): string {
+  return join(homedir(), '.codex');
+}
+
+function codexConfigPath(): string {
+  return join(codexHome(), 'config.toml');
+}
+
+function codexBackupPath(): string {
+  return join(codexHome(), '.dialogueviz-backup');
+}
+
+/** Durable storage for the REAL original Codex base_url, so we can recover
+ *  if config.toml was polluted (left pointing at localhost) by a capture
+ *  that wasn't stopped. Mirrors the Claude Code .dialogueviz-upstream. */
+function codexUpstreamPath(): string {
+  return join(codexHome(), '.dialogueviz-upstream');
+}
+
+function readStoredCodexUpstream(): string | null {
+  try {
+    if (existsSync(codexUpstreamPath())) {
+      const v = readFileSync(codexUpstreamPath(), 'utf-8').trim();
+      return v || null;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
+function writeStoredCodexUpstream(url: string): void {
+  try { writeFileSync(codexUpstreamPath(), url); } catch { /* ignore */ }
+}
+
+function isLocalhostUrl(u: string): boolean {
+  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(u);
 }
 
 /** Durable storage for the REAL original upstream, so we can recover if
@@ -61,8 +99,8 @@ function writeStoredSecret(secret: string): void {
   try { writeFileSync(storedSecretPath(), secret); } catch { /* ignore */ }
 }
 
-function isLocalhostUrl(u: string): boolean {
-  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/.test(u);
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 let proxyServer: ProxyServer | null = null;
@@ -249,10 +287,176 @@ export function registerIpc(): void {
     return res.filePath;
   });
 
+  // --- Codex sessions (scan / load / delete / export) ---
+
+  ipcMain.handle('codex:list', async (): Promise<CodexSessionMeta[]> => {
+    return scanCodexSessions(codexHome());
+  });
+
+  ipcMain.handle('codex:load', async (_e, sourcePath: string): Promise<Session | null> => {
+    try {
+      return loadCodexSession(sourcePath);
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle('codex:delete', async (_e, sourcePath: string): Promise<boolean> => {
+    return deleteCodexSession(sourcePath);
+  });
+
+  ipcMain.handle('codex:export', async (_e, sourcePath: string, exportPath: string): Promise<string | null> => {
+    return exportCodexSession(sourcePath, exportPath);
+  });
+
+  // --- Codex proxy lifecycle (config.toml rewrite) ---
+
+  ipcMain.handle('codex:start', async (): Promise<{ port: number; upstream: string } | null> => {
+    if (proxyServer) {
+      // A capture is already running - don't clobber its liveRuntime.
+      return null;
+    }
+    try {
+      const configPath = codexConfigPath();
+      if (!existsSync(configPath)) {
+        console.error('[codex] config.toml not found at', configPath);
+        return null;
+      }
+      const originalConfig = readFileSync(configPath, 'utf-8');
+
+      // Parse model_provider to find the active provider's base_url
+      const providerMatch = originalConfig.match(/^model_provider\s*=\s*"([^"]+)"/m);
+      if (!providerMatch) {
+        console.error('[codex] cannot find model_provider in config.toml');
+        return null;
+      }
+      const activeProvider = providerMatch[1];
+
+      // Find the [model_providers.<activeProvider>] section and its base_url
+      const sectionRegex = new RegExp(
+        `\\[model_providers\\.${escapeRegex(activeProvider)}\\]([\\s\\S]*?)(?=\\n\\[|$)`,
+      );
+      const sectionMatch = originalConfig.match(sectionRegex);
+      if (!sectionMatch) {
+        console.error(`[codex] cannot find [model_providers.${activeProvider}] section`);
+        return null;
+      }
+      const baseUrlMatch = sectionMatch[1].match(/^base_url\s*=\s*"([^"]+)"/m);
+      if (!baseUrlMatch) {
+        console.error('[codex] cannot find base_url in provider section');
+        return null;
+      }
+      const originalBaseUrl = baseUrlMatch[1];
+
+      // If config.toml is already pointing at localhost (left over from a
+      // previous capture that wasn't stopped), recover the real upstream
+      // from durable storage instead of using the stale localhost URL.
+      let realBaseUrl = originalBaseUrl;
+      if (isLocalhostUrl(originalBaseUrl)) {
+        const stored = readStoredCodexUpstream();
+        if (stored && !isLocalhostUrl(stored)) {
+          realBaseUrl = stored;
+        } else {
+          console.error('[codex] config.toml is pointing at localhost and no durable upstream found');
+          return null;
+        }
+      } else {
+        // Save the real upstream durably for future recovery.
+        writeStoredCodexUpstream(originalBaseUrl);
+      }
+
+      // Save original config for restore on stop
+      writeFileSync(codexBackupPath(), originalConfig, 'utf-8');
+
+      // Start proxy with the real upstream. Strip to origin (e.g.
+      // "https://api.minimaxi.com/v1" -> "https://api.minimaxi.com") so
+      // handleResponses can reconstruct the full URL as origin + req.path.
+      const upstreamOrigin = new URL(realBaseUrl).origin;
+      proxyServer = await startProxyServer(8787, upstreamOrigin);
+
+      proxyServer.onCaptured((apiRequest) => {
+        const windows = BrowserWindow.getAllWindows();
+        if (windows.length > 0) {
+          windows[0].webContents.send('proxy:live-update', apiRequest);
+        }
+        pushCapturedRequest(apiRequest);
+      });
+
+      // Allocate live session
+      const store = ensureLiveStore();
+      const now = Date.now();
+      const liveSession: Session = {
+        id: `codex-live-${now}`,
+        source: 'proxy-live',
+        client: 'codex',
+        startedAt: now,
+        title: `Codex 捕获 (port ${proxyServer.port})`,
+        requests: [],
+        conversation: [],
+      };
+      const path = join(claudeProjectsDir(), generateLiveFileName(now));
+      liveRuntime = { session: liveSession, path, saveTimer: null, lastSize: 0 };
+      try { store.saveSessionAtPath(liveSession, path); } catch (err) {
+        console.error('[codex] initial save failed:', err);
+      }
+
+      // Rewrite config.toml: replace base_url with proxy URL.
+      // Keep the /v1 suffix so Codex sends to /v1/responses (matching our
+      // Express route). The upstream is stripped to origin only - the full
+      // path is reconstructed from req.originalUrl in handleResponses.
+      const proxyUrl = `http://localhost:${proxyServer.port}/v1`;
+      const newConfig = originalConfig.replace(
+        sectionRegex,
+        (full) => full.replace(baseUrlMatch[0], `base_url = "${proxyUrl}"`),
+      );
+      writeFileSync(configPath, newConfig, 'utf-8');
+
+      return { port: proxyServer.port, upstream: proxyServer.upstream };
+    } catch (err) {
+      console.error('[codex] failed to start:', err);
+      return null;
+    }
+  });
+
+  ipcMain.handle('codex:stop', async (): Promise<void> => {
+    if (proxyServer) {
+      await proxyServer.stop();
+      proxyServer = null;
+    }
+    // Restore config.toml from backup. If the backup itself is broken
+    // (pointing at localhost - can happen if start ran on an already-polluted
+    // config), fall back to the durable upstream.
+    const backupPath = codexBackupPath();
+    if (existsSync(backupPath)) {
+      try {
+        let original = readFileSync(backupPath, 'utf-8');
+        // Check if backup's base_url is localhost (broken)
+        if (original.includes('base_url = "http://localhost')) {
+          const stored = readStoredCodexUpstream();
+          if (stored) {
+            original = original.replace(
+              /base_url = "http:\/\/localhost[^"]*"/,
+              `base_url = "${stored}"`,
+            );
+          }
+        }
+        writeFileSync(codexConfigPath(), original, 'utf-8');
+      } catch (err) {
+        console.error('[codex] failed to restore config.toml:', err);
+      }
+    }
+    // Flush the live session with endedAt
+    if (liveRuntime) {
+      liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
+      flushLiveSave();
+      liveRuntime = null;
+    }
+  });
+
   // --- Proxy lifecycle ---
   ipcMain.handle('proxy:start', async (): Promise<{ port: number; upstream: string } | null> => {
     if (proxyServer) {
-      return { port: proxyServer.port, upstream: proxyServer.upstream };
+      return null;
     }
     try {
       // Determine the REAL original upstream BEFORE rewriting settings.json.

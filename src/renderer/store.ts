@@ -2,12 +2,15 @@
 import { create } from 'zustand';
 import { Session, ApiRequest, Message } from '../main/model/types';
 import { SessionMeta } from '../main/adapters/claude-log';
+import { CodexSessionMeta } from '../main/adapters/codex-log';
 import { LiveMeta } from '../main/store/persistent-store';
 
 export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log';
 
 interface State {
   sessions: SessionMeta[];
+  /** Codex CLI / Desktop rollout sessions. */
+  codexSessions: CodexSessionMeta[];
   /** Past proxy-live captures, newest first. */
   liveHistory: LiveMeta[];
   currentSession: Session | null;
@@ -51,9 +54,12 @@ interface State {
   setDirectoryWidth: (w: number) => void;
   refreshSessions: () => Promise<void>;
   refreshLiveHistory: () => Promise<void>;
+  refreshCodexSessions: () => Promise<void>;
   openSession: (sourcePath: string) => Promise<void>;
+  openCodexSession: (sourcePath: string) => Promise<void>;
   openLive: (path: string) => Promise<void>;
   startCapture: () => Promise<void>;
+  startCodexCapture: () => Promise<void>;
   stopCapture: () => Promise<void>;
   goToLive: () => void;
   /** Delete a proxy-live capture (our own .proxy-live-*.json). */
@@ -66,6 +72,10 @@ interface State {
   deleteClaudeSession: (sourcePath: string) => Promise<boolean>;
   /** Export a Claude Code JSONL session to a user-chosen path. */
   exportClaudeSession: (sourcePath: string, exportPath: string) => Promise<string | null>;
+  /** Delete a Codex rollout session. */
+  deleteCodexSession: (sourcePath: string) => Promise<boolean>;
+  /** Export a Codex rollout session to a user-chosen path. */
+  exportCodexSession: (sourcePath: string, exportPath: string) => Promise<string | null>;
   /** Open a save dialog and return the chosen path (or null if canceled). */
   pickExportPath: (defaultName: string) => Promise<string | null>;
 }
@@ -91,6 +101,7 @@ function loadStoredWidth(storageKey: string, fallback: number, min: number, max:
 
 export const useStore = create<State>((set, get) => ({
   sessions: [],
+  codexSessions: [],
   liveHistory: [],
   currentSession: null,
   openSourcePath: null,
@@ -169,6 +180,10 @@ export const useStore = create<State>((set, get) => ({
     }
   },
   startCapture: async () => {
+    if (get().proxyStatus) {
+      set({ toast: '已有捕获正在运行，请先停止。' });
+      return;
+    }
     const status = await window.api.startProxy();
     if (!status) return;
     set({ proxyStatus: status });
@@ -202,9 +217,13 @@ export const useStore = create<State>((set, get) => ({
     get().refreshLiveHistory();
   },
   stopCapture: async () => {
-    await window.api.stopProxy();
+    const client = get().currentSession?.client ?? 'claude-code';
+    if (client === 'codex') {
+      await window.api.stopCodex();
+    } else {
+      await window.api.stopProxy();
+    }
     set({ proxyStatus: null });
-    // Capture may have grown; refresh history so the file's metadata is fresh.
     get().refreshLiveHistory();
   },
   goToLive: () => {
@@ -264,6 +283,83 @@ export const useStore = create<State>((set, get) => ({
       return await window.api.claudeExport(sourcePath, exportPath);
     } catch (err) {
       console.error('[store] exportClaudeSession failed:', err);
+      return null;
+    }
+  },
+  refreshCodexSessions: async () => {
+    try {
+      const codexSessions = await window.api.listCodex();
+      set({ codexSessions });
+    } catch {
+      // Codex may not be installed; silently ignore.
+    }
+  },
+  openCodexSession: async (sourcePath) => {
+    set({ loading: true });
+    try {
+      const session = await window.api.loadCodex(sourcePath);
+      get().setCurrentSession(session);
+      set({ openSourcePath: sourcePath });
+    } finally {
+      set({ loading: false });
+    }
+  },
+  startCodexCapture: async () => {
+    if (get().proxyStatus) {
+      set({ toast: '已有捕获正在运行，请先停止。' });
+      return;
+    }
+    const status = await window.api.startCodex();
+    if (!status) return;
+    set({ proxyStatus: status });
+    const live: Session = {
+      id: `codex-live-${Date.now()}`,
+      source: 'proxy-live',
+      client: 'codex',
+      startedAt: Date.now(),
+      title: `Codex 捕获 (port ${status.port})`,
+      requests: [],
+      conversation: [],
+    };
+    get().setCurrentSession(live);
+    set({ liveSession: live });
+    window.api.onLiveUpdate((req) => {
+      const s = get().currentSession;
+      if (!s || s.source !== 'proxy-live') return;
+      const requests = [...s.requests, req];
+      let conversation = s.conversation;
+      if (req.inputMessages) {
+        conversation = [...req.inputMessages];
+        if (req.response) {
+          const u = req.response.usage;
+          conversation = [...conversation, { role: 'assistant', content: req.response.content, meta: { outputTokens: u?.outputTokens || undefined, model: req.response.usage.model } }];
+        }
+      }
+      const next = { ...s, requests, conversation };
+      set({ currentSession: next, liveSession: next });
+    });
+    get().refreshLiveHistory();
+  },
+  deleteCodexSession: async (sourcePath) => {
+    try {
+      const ok = await window.api.codexDelete(sourcePath);
+      if (!ok) return false;
+      if (get().openSourcePath === sourcePath) {
+        get().setCurrentSession(null);
+        set({ openSourcePath: null });
+      }
+      await get().refreshCodexSessions();
+      return true;
+    } catch (err) {
+      console.error('[store] deleteCodexSession failed:', err);
+      return false;
+    }
+  },
+  exportCodexSession: async (sourcePath, exportPath) => {
+    try {
+      return await window.api.codexExport(sourcePath, exportPath);
+    } catch (err) {
+      console.error('[store] exportCodexSession failed:', err);
       return null;
     }
   },

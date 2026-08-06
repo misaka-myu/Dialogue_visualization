@@ -18,5 +18,12 @@ contextBridge.exposeInMainWorld('api', {
   liveExport: (path: string, exportPath: string) => ipcRenderer.invoke('live:export', path, exportPath),
   claudeDelete: (sourcePath: string) => ipcRenderer.invoke('claude:delete', sourcePath),
   claudeExport: (sourcePath: string, exportPath: string) => ipcRenderer.invoke('claude:export', sourcePath, exportPath),
+  // Codex
+  listCodex: () => ipcRenderer.invoke('codex:list'),
+  loadCodex: (sourcePath: string) => ipcRenderer.invoke('codex:load', sourcePath),
+  codexDelete: (sourcePath: string) => ipcRenderer.invoke('codex:delete', sourcePath),
+  codexExport: (sourcePath: string, exportPath: string) => ipcRenderer.invoke('codex:export', sourcePath, exportPath),
+  startCodex: () => ipcRenderer.invoke('codex:start'),
+  stopCodex: () => ipcRenderer.invoke('codex:stop'),
   pickExportPath: (defaultName: string) => ipcRenderer.invoke('claude:pickExportPath', defaultName),
 });
