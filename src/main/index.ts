@@ -13,8 +13,18 @@ function createWindow(): void {
       nodeIntegration: false,
     },
   });
+
   if (process.env.ELECTRON_RENDERER_URL) {
-    win.loadURL(process.env.ELECTRON_RENDERER_URL);
+    // In dev mode electron-vite may start Electron before Vite's HTTP server is
+    // ready – retry with back-off until the renderer URL becomes reachable.
+    const url = process.env.ELECTRON_RENDERER_URL;
+    const tryLoad = (attempt: number): void => {
+      win.loadURL(url).catch(() => {
+        const delay = Math.min(500 * attempt, 3000);
+        setTimeout(() => tryLoad(attempt + 1), delay);
+      });
+    };
+    tryLoad(1);
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'));
   }
