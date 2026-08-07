@@ -9,6 +9,7 @@ export default defineConfig({
     root: '.',
     plugins: [react()],
     resolve: { alias: { '@': resolve(__dirname, 'src') } },
-    build: { rollupOptions: { input: { index: resolve(__dirname, 'index.html') } } }
+    build: { rollupOptions: { input: { index: resolve(__dirname, 'index.html') } } },
+    server: { host: '127.0.0.1' },
   }
 });
