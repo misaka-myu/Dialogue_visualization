@@ -1,5 +1,6 @@
 // src/main/model/normalizer.ts
 import { ApiRequest, ApiResponse, ContentBlock, Message, ToolDef } from './types';
+import { extractReasoningText } from '../utils/reasoning';
 
 type RawBlock = Record<string, any>;
 
@@ -169,6 +170,11 @@ export function normalizeOpenaiResponsesResponse(body: RawBlock): ApiResponse {
   for (const item of output) {
     if (item.type === 'message') {
       content.push(...normalizeCodexContentBlocks(item.content));
+    } else if (item.type === 'reasoning') {
+      const text = extractReasoningText(item);
+      if (text) {
+        content.push({ type: 'thinking', thinking: text });
+      }
     } else if (item.type === 'function_call') {
       let input: unknown;
       try { input = JSON.parse(item.arguments ?? '{}'); } catch { input = {}; }

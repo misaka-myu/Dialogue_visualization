@@ -26,8 +26,9 @@ function Section({ id, label, color, count, children }: {
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(SECTION_STORAGE_KEY) || '{}');
-      return stored[sectionKey(id)] === true;
-    } catch { return false; }
+      const val = stored[sectionKey(id)];
+      return val !== undefined ? Boolean(val) : true;
+    } catch { return true; }
   });
   const toggle = () => {
     const next = !collapsed;

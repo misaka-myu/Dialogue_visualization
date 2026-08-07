@@ -104,7 +104,12 @@ export function accumulateClaudeSse(
             builder.text += (delta.text as string) ?? '';
             break;
           case 'thinking_delta':
-            builder.thinking += (delta.thinking as string) ?? '';
+          case 'reasoning_delta':
+          case 'reasoning_content_delta':
+            builder.thinking += (delta.thinking as string) ?? (delta.reasoning_content as string) ?? (delta.reasoning as string) ?? '';
+            if (builder.type === 'text' && !builder.text) {
+              builder.type = 'thinking';
+            }
             break;
           case 'signature_delta':
             builder.signature =
@@ -114,7 +119,14 @@ export function accumulateClaudeSse(
             builder.toolInputRaw += (delta.partial_json as string) ?? '';
             break;
           default:
-            // Unknown delta type - ignore.
+            // Check direct delta properties (e.g. OpenAI reasoning_content)
+            if (typeof delta.reasoning_content === 'string') {
+              builder.thinking += delta.reasoning_content;
+              if (builder.type === 'text' && !builder.text) builder.type = 'thinking';
+            } else if (typeof delta.reasoning === 'string') {
+              builder.thinking += delta.reasoning;
+              if (builder.type === 'text' && !builder.text) builder.type = 'thinking';
+            }
             break;
         }
         break;
@@ -126,40 +138,32 @@ export function accumulateClaudeSse(
         const builder = blockBuilders.get(idx);
         if (!builder) break;
 
-        let block: ContentBlock | null = null;
-        switch (builder.type) {
-          case 'text':
-            block = { type: 'text', text: builder.text };
-            break;
-          case 'thinking':
-            block = {
-              type: 'thinking',
-              thinking: builder.thinking,
-              signature: builder.signature,
-            };
-            break;
-          case 'tool_use': {
-            let input: unknown = builder.toolInput;
-            if (input === undefined && builder.toolInputRaw) {
-              try {
-                input = JSON.parse(builder.toolInputRaw);
-              } catch {
-                input = builder.toolInputRaw;
-              }
-            }
-            block = {
-              type: 'tool_use',
-              id: builder.toolId,
-              name: builder.toolName,
-              input: input ?? {},
-            };
-            break;
-          }
-          default:
-            // Unknown block type - skip.
-            break;
+        if (builder.type === 'thinking' || builder.thinking.trim().length > 0) {
+          content.push({
+            type: 'thinking',
+            thinking: builder.thinking,
+            signature: builder.signature,
+          });
         }
-        if (block) content.push(block);
+
+        if (builder.type === 'text' || (builder.text.trim().length > 0 && builder.type !== 'thinking')) {
+          content.push({ type: 'text', text: builder.text });
+        } else if (builder.type === 'tool_use') {
+          let input: unknown = builder.toolInput;
+          if (input === undefined && builder.toolInputRaw) {
+            try {
+              input = JSON.parse(builder.toolInputRaw);
+            } catch {
+              input = builder.toolInputRaw;
+            }
+          }
+          content.push({
+            type: 'tool_use',
+            id: builder.toolId,
+            name: builder.toolName,
+            input: input ?? {},
+          });
+        }
         blockBuilders.delete(idx);
         break;
       }
