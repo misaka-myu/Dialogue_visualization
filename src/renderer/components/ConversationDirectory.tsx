@@ -14,7 +14,7 @@ import type { Message } from '../../main/model/types';
 
 // ─── Data model ───────────────────────────────────────────────────────────────
 
-interface RoundStep {
+export interface RoundStep {
   /** Index in session.conversation – used for scrollToIndex */
   messageIndex: number;
   kind: 'thinking' | 'tool_call' | 'tool_result' | 'response';
@@ -26,17 +26,17 @@ interface RoundStep {
   charCount?: number;
 }
 
-interface Round {
+export interface Round {
   roundNumber: number;
   userIndex: number;
-  userMessage: Message;
+  userMessage?: Message;
   steps: RoundStep[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Extract the most meaningful short string from a tool's input object. */
-function toolInputPreview(input: unknown): string {
+export function toolInputPreview(input: unknown): string {
   if (!input || typeof input !== 'object') return '';
   const inp = input as Record<string, unknown>;
   if (typeof inp.command === 'string') return inp.command.replace(/\s+/g, ' ').slice(0, 90);
@@ -48,8 +48,8 @@ function toolInputPreview(input: unknown): string {
   return JSON.stringify(input).slice(0, 60);
 }
 
-/** Build Round[] from the flat conversation array. */
-function buildRounds(messages: Message[]): Round[] {
+/** Build Round[] from the flat conversation array. Handles edge cases like leading assistant messages. */
+export function buildRounds(messages: Message[]): Round[] {
   // Pre-build toolUseId → toolName map so result rows can show the tool name.
   const toolNameMap = new Map<string, string>();
   for (const msg of messages) {
@@ -63,80 +63,88 @@ function buildRounds(messages: Message[]): Round[] {
   }
 
   const rounds: Round[] = [];
+  let currentRound: Round | null = null;
   let roundNum = 0;
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    if (msg.role !== 'user') continue;
 
-    roundNum++;
-    const steps: RoundStep[] = [];
-
-    // Collect everything until the next user message.
-    let j = i + 1;
-    while (j < messages.length && messages[j].role !== 'user') {
-      const stepMsg = messages[j];
-
-      if (stepMsg.role === 'assistant') {
-        for (const block of stepMsg.content) {
-          if (block.type === 'thinking' && block.thinking?.trim()) {
-            steps.push({
-              messageIndex: j,
-              kind: 'thinking',
-              preview: '',
-              charCount: block.thinking.length,
-            });
-          } else if (block.type === 'tool_use') {
-            steps.push({
-              messageIndex: j,
-              kind: 'tool_call',
-              toolName: block.name,
-              preview: toolInputPreview(block.input),
-            });
-          } else if (block.type === 'text' && block.text?.trim()) {
-            steps.push({
-              messageIndex: j,
-              kind: 'response',
-              preview: block.text.trim().slice(0, 80),
-              charCount: block.text.length,
-            });
-          }
-        }
-      } else if (stepMsg.role === 'tool') {
-        for (const block of stepMsg.content) {
-          if (block.type === 'tool_result') {
-            const raw =
-              typeof block.content === 'string'
-                ? block.content
-                : JSON.stringify(block.content ?? '');
-            const tn = toolNameMap.get(block.toolUseId) ?? 'tool';
-            steps.push({
-              messageIndex: j,
-              kind: 'tool_result',
-              toolName: tn,
-              preview: raw.trim().slice(0, 60),
-              charCount: raw.length,
-            });
-          }
-        }
-      }
-
-      j++;
+    if (msg.role === 'user') {
+      if (currentRound) rounds.push(currentRound);
+      roundNum++;
+      currentRound = {
+        roundNumber: roundNum,
+        userIndex: i,
+        userMessage: msg,
+        steps: [],
+      };
+      continue;
     }
 
-    rounds.push({
-      roundNumber: roundNum,
-      userIndex: i,
-      userMessage: msg,
-      steps,
-    });
+    if (msg.role === 'system') continue;
+
+    // Messages before any user message go to round 0
+    if (!currentRound) {
+      currentRound = {
+        roundNumber: 0,
+        userIndex: i,
+        steps: [],
+      };
+    }
+
+    if (msg.role === 'assistant') {
+      for (const block of msg.content) {
+        if (block.type === 'thinking' && block.thinking?.trim()) {
+          currentRound.steps.push({
+            messageIndex: i,
+            kind: 'thinking',
+            preview: '',
+            charCount: block.thinking.length,
+          });
+        } else if (block.type === 'tool_use') {
+          currentRound.steps.push({
+            messageIndex: i,
+            kind: 'tool_call',
+            toolName: block.name,
+            preview: toolInputPreview(block.input),
+          });
+        } else if (block.type === 'text' && block.text?.trim()) {
+          currentRound.steps.push({
+            messageIndex: i,
+            kind: 'response',
+            preview: block.text.trim().slice(0, 80),
+            charCount: block.text.length,
+          });
+        }
+      }
+    } else if (msg.role === 'tool') {
+      for (const block of msg.content) {
+        if (block.type === 'tool_result') {
+          const raw =
+            typeof block.content === 'string'
+              ? block.content
+              : JSON.stringify(block.content ?? '');
+          const tn = toolNameMap.get(block.toolUseId) ?? 'tool';
+          currentRound.steps.push({
+            messageIndex: i,
+            kind: 'tool_result',
+            toolName: tn,
+            preview: raw.trim().slice(0, 60),
+            charCount: raw.length,
+          });
+        }
+      }
+    }
   }
+
+  if (currentRound) rounds.push(currentRound);
 
   return rounds;
 }
 
 /** Extract a short readable preview from a user message. */
-function userPreview(message: Message): string {
+function userPreview(message?: Message): string {
+  if (!message) return '系统/初始初始化';
   for (const block of message.content) {
     if (block.type === 'text') {
       const t = block.text.trim();
@@ -146,12 +154,14 @@ function userPreview(message: Message): string {
   return '';
 }
 
-/** Format a character count as "Nk" or "N". */
-function fmtChars(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+/** Format a character count as "Nk" or "NM". */
+export function fmtChars(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
 }
 
-// ─── Three-dots copy menu (same as original) ─────────────────────────────────
+// ─── Three-dots copy menu ─────────────────────────────────────────────────
 
 function RowMenu({ onCopyText, onCopyJson }: { onCopyText: () => void; onCopyJson: () => void }) {
   const [open, setOpen] = useState(false);
@@ -296,7 +306,7 @@ function StepRow({
   );
 }
 
-// ─── Round entry (header + optional steps) ────────────────────────────────────
+// ─── Round entry ──────────────────────────────────────────────────────────────
 
 function RoundEntry({
   round,
@@ -313,13 +323,13 @@ function RoundEntry({
 }) {
   const { roundNumber, userIndex, userMessage, steps } = round;
   const preview = useMemo(() => userPreview(userMessage), [userMessage]);
-  const tok = getMessageTokenInfo(userMessage);
+  const tok = userMessage ? getMessageTokenInfo(userMessage) : { count: 0, real: false };
   const isActive = activeIndex === userIndex;
-  const isSidechain = userMessage.meta?.isSidechain;
+  const isSidechain = userMessage?.meta?.isSidechain;
   const hasSteps = steps.length > 0;
 
-  const copyText = useCallback(() => { void copyMessageText(userMessage); }, [userMessage]);
-  const copyJson = useCallback(() => { void copyMessageJson(userMessage); }, [userMessage]);
+  const copyText = useCallback(() => { if (userMessage) void copyMessageText(userMessage); }, [userMessage]);
+  const copyJson = useCallback(() => { if (userMessage) void copyMessageJson(userMessage); }, [userMessage]);
 
   return (
     <div>
@@ -358,8 +368,8 @@ function RoundEntry({
         <span
           style={{
             flexShrink: 0, width: 18, height: 18, borderRadius: '50%',
-            background: isActive ? '#64b5f6' : 'rgba(155,140,255,0.18)',
-            color: isActive ? '#000' : '#9b8cff',
+            background: isActive ? '#64b5f6' : roundNumber === 0 ? 'rgba(255,255,255,0.12)' : 'rgba(155,140,255,0.18)',
+            color: isActive ? '#000' : roundNumber === 0 ? '#aaa' : '#9b8cff',
             fontSize: 10, fontWeight: 600,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             marginTop: 2, cursor: 'pointer',
@@ -369,7 +379,7 @@ function RoundEntry({
           {roundNumber}
         </span>
 
-        {/* Content area (clickable → scroll) */}
+        {/* Content area */}
         <div
           onClick={() => onScrollTo(userIndex)}
           style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
@@ -386,19 +396,21 @@ function RoundEntry({
             {preview || <span style={{ opacity: 0.5 }}>USER</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, opacity: 0.55, marginTop: 1 }}>
-            <span>👤 USER</span>
+            <span>{userMessage ? '👤 USER' : '⚙️ INITIAL'}</span>
             {hasSteps && (
               <span style={{ opacity: 0.6 }}>· {steps.length} 步</span>
             )}
-            <span style={{ marginLeft: 'auto' }} title={`${tok.count} tokens`}>
-              {tok.real ? '✓' : '≈'} {formatTokenCount(tok.count)}
-            </span>
-            <RowMenu onCopyText={copyText} onCopyJson={copyJson} />
+            {userMessage && (
+              <span style={{ marginLeft: 'auto' }} title={`${tok.count} tokens`}>
+                {tok.real ? '✓' : '≈'} {formatTokenCount(tok.count)}
+              </span>
+            )}
+            {userMessage && <RowMenu onCopyText={copyText} onCopyJson={copyJson} />}
           </div>
         </div>
       </div>
 
-      {/* ── Steps (only when expanded) ── */}
+      {/* ── Steps ── */}
       {expanded && steps.map((step, i) => (
         <StepRow
           key={`${step.messageIndex}-${step.kind}-${i}`}
@@ -445,9 +457,6 @@ export function ConversationDirectory() {
     // Keep highlight persistent until the user clicks a different item.
     useStore.getState().setActiveDirectoryIndex(index);
     const v = getVirtuosoRef();
-    // Use 'auto' (instant jump): 'smooth' relies on estimated heights for
-    // off-screen items and can overshoot then correct, causing a visible
-    // reverse-scroll glitch with variable-height content.
     v?.scrollToIndex({ index, align: 'start', behavior: 'auto' });
   }, []);
 

@@ -20,6 +20,10 @@ function createWindow(): void {
     const url = process.env.ELECTRON_RENDERER_URL;
     const tryLoad = (attempt: number): void => {
       win.loadURL(url).catch(() => {
+        if (attempt >= 10) {
+          console.error('[electron] Vite dev server failed to become reachable after 10 attempts.');
+          return;
+        }
         const delay = Math.min(500 * attempt, 3000);
         setTimeout(() => tryLoad(attempt + 1), delay);
       });
