@@ -14,6 +14,7 @@
 import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs';
 import { dirname, join, basename } from 'path';
 import { Session, ApiRequest, Message, MessageMeta, ContentBlock } from '../model/types';
+import { extractReasoningText } from '../utils/reasoning';
 
 const TITLE_MAX_CHARS = 80;
 
@@ -403,27 +404,7 @@ function normalizeCodexContent(content: unknown): ContentBlock[] {
   }).filter((b): b is ContentBlock => b !== null);
 }
 
-/** Extract text from a reasoning response_item payload. The content/summary can be
- *  either an array of objects ({type: "reasoning_text", text}, {type: "summary_text", text})
- *  or a plain string. */
-function extractReasoningText(p: Record<string, any>): string | null {
-  if (typeof p.summary === 'string' && p.summary.trim()) return p.summary;
-  if (Array.isArray(p.summary)) {
-    const texts = p.summary
-      .map((b: any) => (typeof b === 'string' ? b : b?.text ?? b?.summary ?? ''))
-      .filter((t: string) => typeof t === 'string' && t.trim());
-    if (texts.length) return texts.join('\n');
-  }
-  if (Array.isArray(p.content)) {
-    const texts = p.content
-      .filter((b: any) => !b || b.type === 'reasoning_text' || b.type === 'text' || b.type === 'reasoning' || b.type === 'summary_text')
-      .map((b: any) => (typeof b === 'string' ? b : b?.text ?? b?.summary ?? ''))
-      .filter((t: string) => typeof t === 'string' && t.trim());
-    if (texts.length) return texts.join('\n');
-  }
-  if (typeof p.content === 'string' && p.content.trim()) return p.content;
-  return null;
-}
+
 
 function deriveTitle(conversation: Message[]): string | undefined {
   for (const m of conversation) {

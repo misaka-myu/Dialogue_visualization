@@ -1,5 +1,5 @@
 // src/renderer/views/ChatFlowView.tsx
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
@@ -135,20 +135,20 @@ export function ChatFlowView() {
   // the store so ConversationDirectory can highlight the matching row.
   // Throttled with rAF to prevent rapid state churn and scroll jitter during fast scrolling.
   const directoryOpen = useStore((s) => s.directoryOpen);
-  const rafIdRef = useState<{ id: number | null }>({ id: null })[0];
+  const rafIdRef = useRef<number | null>(null);
 
   const onRangeChanged = useCallback(
     (range: { startIndex: number; endIndex: number }) => {
       if (!directoryOpen) return;
-      if (rafIdRef.id !== null) return;
-      rafIdRef.id = requestAnimationFrame(() => {
-        rafIdRef.id = null;
+      if (rafIdRef.current !== null) return;
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null;
         if (useStore.getState().activeDirectoryIndex !== range.startIndex) {
           setActiveDirectoryIndex(range.startIndex);
         }
       });
     },
-    [directoryOpen, setActiveDirectoryIndex, rafIdRef],
+    [directoryOpen, setActiveDirectoryIndex],
   );
 
   if (!session) {
