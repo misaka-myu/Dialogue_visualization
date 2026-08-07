@@ -7,10 +7,12 @@ import { CodeViewer, languageFromPath } from '../components/CodeViewer';
 import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
 import { setVirtuosoRef } from '../hooks/virtuosoRef';
 
+import { MarkdownViewer } from '../components/MarkdownViewer';
+
 function Block({ block, lang }: { block: ContentBlock; lang?: string }) {
   switch (block.type) {
     case 'text':
-      return <div style={{ whiteSpace: 'pre-wrap' }}>{block.text}</div>;
+      return <MarkdownViewer content={block.text} />;
     case 'tool_use':
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
@@ -32,14 +34,46 @@ function Block({ block, lang }: { block: ContentBlock; lang?: string }) {
       );
     }
     case 'thinking':
-      return (
-        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(206,147,216,0.1)', borderRadius: 4, fontSize: 12, opacity: 0.7, whiteSpace: 'pre-wrap' }}>
-          💭 {block.thinking}
-        </div>
-      );
+      return <ThinkingBlock text={block.thinking} signature={block.signature} />;
     default:
       return null;
   }
+}
+
+function ThinkingBlock({ text, signature }: { text: string; signature?: string }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const charLen = text.length;
+  const tokEstimate = Math.ceil(charLen / 4);
+
+  return (
+    <div style={{ marginTop: 4, background: 'rgba(206,147,216,0.08)', border: '1px solid rgba(206,147,216,0.2)', borderRadius: 4, fontSize: 12 }}>
+      {/* Header bar */}
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 6,
+          cursor: 'pointer', userSelect: 'none', background: 'rgba(206,147,216,0.06)',
+          color: '#ce93d8', fontWeight: 600, fontSize: 11,
+        }}
+      >
+        <span>💭 思考过程</span>
+        <span style={{ opacity: 0.6, fontSize: 10 }}>· {charLen} 字 (≈{tokEstimate} tok)</span>
+        {signature && (
+          <span style={{ fontSize: 9, opacity: 0.6, background: 'rgba(256,256,256,0.1)', padding: '1px 4px', borderRadius: 3 }}>
+            🔒 已校验签名
+          </span>
+        )}
+        <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{collapsed ? '▶ 展开' : '▼ 收起'}</span>
+      </div>
+
+      {/* Body */}
+      {!collapsed && (
+        <div style={{ padding: '6px 10px', opacity: 0.9, lineHeight: 1.45, borderTop: '1px dashed rgba(206,147,216,0.15)' }}>
+          {text ? <MarkdownViewer content={text} /> : <span style={{ opacity: 0.4 }}>(未捕获到具体思考文本)</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: ContentBlock[]; meta?: import('../../main/model/types').MessageMeta; toolUseLangs?: Map<string, string> }) {
@@ -99,14 +133,22 @@ export function ChatFlowView() {
 
   // Scroll-sync: when the visible range shifts, write the topmost index to
   // the store so ConversationDirectory can highlight the matching row.
-  // Skipped while the directory is closed to avoid pointless renders.
+  // Throttled with rAF to prevent rapid state churn and scroll jitter during fast scrolling.
   const directoryOpen = useStore((s) => s.directoryOpen);
+  const rafIdRef = useState<{ id: number | null }>({ id: null })[0];
+
   const onRangeChanged = useCallback(
     (range: { startIndex: number; endIndex: number }) => {
       if (!directoryOpen) return;
-      setActiveDirectoryIndex(range.startIndex);
+      if (rafIdRef.id !== null) return;
+      rafIdRef.id = requestAnimationFrame(() => {
+        rafIdRef.id = null;
+        if (useStore.getState().activeDirectoryIndex !== range.startIndex) {
+          setActiveDirectoryIndex(range.startIndex);
+        }
+      });
     },
-    [directoryOpen, setActiveDirectoryIndex],
+    [directoryOpen, setActiveDirectoryIndex, rafIdRef],
   );
 
   if (!session) {
@@ -135,6 +177,8 @@ export function ChatFlowView() {
           ref={setVirtuosoRef}
           rangeChanged={onRangeChanged}
           data={messages}
+          defaultItemHeight={100}
+          overscan={300}
           itemContent={(index, m) => (
             <div style={{ padding: '0 12px' }}>
               <Message role={m.role} blocks={m.content} meta={m.meta} toolUseLangs={toolUseLangs} />

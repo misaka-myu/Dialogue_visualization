@@ -104,7 +104,12 @@ export function accumulateClaudeSse(
             builder.text += (delta.text as string) ?? '';
             break;
           case 'thinking_delta':
-            builder.thinking += (delta.thinking as string) ?? '';
+          case 'reasoning_delta':
+          case 'reasoning_content_delta':
+            builder.thinking += (delta.thinking as string) ?? (delta.reasoning_content as string) ?? (delta.reasoning as string) ?? '';
+            if (builder.type === 'text' && !builder.text) {
+              builder.type = 'thinking';
+            }
             break;
           case 'signature_delta':
             builder.signature =
@@ -114,7 +119,14 @@ export function accumulateClaudeSse(
             builder.toolInputRaw += (delta.partial_json as string) ?? '';
             break;
           default:
-            // Unknown delta type - ignore.
+            // Check direct delta properties (e.g. OpenAI reasoning_content)
+            if (typeof delta.reasoning_content === 'string') {
+              builder.thinking += delta.reasoning_content;
+              if (builder.type === 'text' && !builder.text) builder.type = 'thinking';
+            } else if (typeof delta.reasoning === 'string') {
+              builder.thinking += delta.reasoning;
+              if (builder.type === 'text' && !builder.text) builder.type = 'thinking';
+            }
             break;
         }
         break;

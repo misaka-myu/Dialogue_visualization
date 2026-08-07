@@ -32,6 +32,8 @@ export function accumulateOpenaiResponsesSse(
   // Track text being accumulated for the current message output
   let currentText = '';
   let hasText = false;
+  let currentReasoning = '';
+  let hasReasoning = false;
 
   // Track function call arguments by call_id (stable across events even
   // if output_index is missing or duplicated).
@@ -56,6 +58,9 @@ export function accumulateOpenaiResponsesSse(
         // Start accumulating text for this message
         currentText = '';
         hasText = false;
+      } else if (item.type === 'reasoning') {
+        currentReasoning = '';
+        hasReasoning = false;
       } else if (item.type === 'function_call') {
         const key = item.call_id ?? item.id ?? '';
         if (!key) {
@@ -67,6 +72,29 @@ export function accumulateOpenaiResponsesSse(
           name: item.name ?? '',
           args: '',
         });
+      }
+      continue;
+    }
+
+    if (
+      type === 'response.reasoning.delta' ||
+      type === 'response.reasoning_text.delta' ||
+      type === 'response.summary_text.delta'
+    ) {
+      currentReasoning += evt.delta ?? '';
+      hasReasoning = true;
+      continue;
+    }
+
+    if (
+      type === 'response.reasoning.done' ||
+      type === 'response.reasoning_text.done' ||
+      type === 'response.summary_text.done'
+    ) {
+      if (hasReasoning) {
+        content.push({ type: 'thinking', thinking: currentReasoning });
+        currentReasoning = '';
+        hasReasoning = false;
       }
       continue;
     }
@@ -129,7 +157,11 @@ export function accumulateOpenaiResponsesSse(
     }
   }
 
-  // If we have accumulated text that wasn't finalized with .done, push it
+  // If we have accumulated reasoning or text that wasn't finalized with .done, push them
+  if (hasReasoning && currentReasoning) {
+    content.push({ type: 'thinking', thinking: currentReasoning });
+  }
+
   if (hasText && currentText) {
     content.push({ type: 'text', text: currentText });
   }

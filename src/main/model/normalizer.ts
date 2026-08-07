@@ -169,6 +169,17 @@ export function normalizeOpenaiResponsesResponse(body: RawBlock): ApiResponse {
   for (const item of output) {
     if (item.type === 'message') {
       content.push(...normalizeCodexContentBlocks(item.content));
+    } else if (item.type === 'reasoning') {
+      const text = typeof item.summary === 'string' && item.summary.trim()
+        ? item.summary
+        : Array.isArray(item.summary)
+        ? item.summary.map((s: any) => (typeof s === 'string' ? s : s?.text ?? '')).filter((t: string) => t.trim()).join('\n')
+        : Array.isArray(item.content)
+        ? item.content.map((c: any) => (typeof c === 'string' ? c : c?.text ?? '')).filter((t: string) => t.trim()).join('\n')
+        : typeof item.content === 'string' ? item.content : '';
+      if (text.trim()) {
+        content.push({ type: 'thinking', thinking: text });
+      }
     } else if (item.type === 'function_call') {
       let input: unknown;
       try { input = JSON.parse(item.arguments ?? '{}'); } catch { input = {}; }

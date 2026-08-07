@@ -64,8 +64,8 @@ export function CodeViewer({ value, language }: { value: string; language?: stri
         oneDark,
         ...langExtension(lang),
         EditorView.theme({
-          '&': { backgroundColor: 'transparent', fontSize: '12px', height: '100%' },
-          '.cm-scroller': { fontFamily: 'ui-monospace, monospace' },
+          '&': { backgroundColor: 'transparent', fontSize: '12px', maxHeight: '50vh' },
+          '.cm-scroller': { fontFamily: 'ui-monospace, monospace', overflow: 'auto' },
           '.cm-gutters': { backgroundColor: 'rgba(0,0,0,0.2)', border: 'none' },
         }),
       ],
@@ -75,5 +75,5 @@ export function CodeViewer({ value, language }: { value: string; language?: stri
     return () => { view.destroy(); viewRef.current = null; };
   }, [value, language]);
 
-  return <div ref={ref} style={{ height: '50vh', overflow: 'hidden', border: '1px solid #333', borderRadius: 4 }} />;
+  return <div ref={ref} style={{ maxHeight: '50vh', overflow: 'auto', border: '1px solid #333', borderRadius: 4 }} />;
 }

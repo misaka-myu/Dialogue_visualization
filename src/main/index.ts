@@ -3,6 +3,10 @@ import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
 import { registerIpc, installLiveStoreQuitHook } from './ipc';
 
+// Disable GPU shader disk cache to prevent Windows file-lock errors (ERROR:cache_util_win.cc 0x5)
+// when restarting Electron multiple times in development mode.
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,

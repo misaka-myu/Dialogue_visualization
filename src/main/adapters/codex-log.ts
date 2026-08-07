@@ -242,14 +242,15 @@ export function loadCodexSession(path: string): Session {
       const role = mapCodexRole(p.role);
       if (!role) continue;
       const blocks = normalizeCodexContent(p.content);
-      if (blocks.length === 0) continue;
 
       // If this is an assistant message and we have pending reasoning,
-      // prepend it as a thinking block.
+      // prepend it as a thinking block BEFORE checking if blocks is empty.
       if (role === 'assistant' && pendingReasoning) {
         blocks.unshift({ type: 'thinking', thinking: pendingReasoning });
         pendingReasoning = null;
       }
+
+      if (blocks.length === 0) continue;
 
       const meta: MessageMeta = {
         timestamp: itemTs,
@@ -289,12 +290,25 @@ export function loadCodexSession(path: string): Session {
       try { input = JSON.parse(p.arguments ?? '{}'); } catch { input = {}; }
       const callId = p.call_id ?? p.id;
       const lastMsg = conversation[conversation.length - 1];
+
+      const toolBlock: ContentBlock = { type: 'tool_use', id: callId, name: p.name, input };
+
       if (lastMsg && lastMsg.role === 'assistant') {
-        lastMsg.content.push({ type: 'tool_use', id: callId, name: p.name, input });
+        if (pendingReasoning) {
+          lastMsg.content.unshift({ type: 'thinking', thinking: pendingReasoning });
+          pendingReasoning = null;
+        }
+        lastMsg.content.push(toolBlock);
       } else {
+        const content: ContentBlock[] = [];
+        if (pendingReasoning) {
+          content.push({ type: 'thinking', thinking: pendingReasoning });
+          pendingReasoning = null;
+        }
+        content.push(toolBlock);
         conversation.push({
           role: 'assistant',
-          content: [{ type: 'tool_use', id: callId, name: p.name, input }],
+          content,
           meta: { timestamp: itemTs, model, originator },
         });
       }
@@ -389,15 +403,22 @@ function normalizeCodexContent(content: unknown): ContentBlock[] {
   }).filter((b): b is ContentBlock => b !== null);
 }
 
-/** Extract text from a reasoning response_item payload. The content can be
- *  either an array of {type: "reasoning_text", text} blocks or a plain string. */
+/** Extract text from a reasoning response_item payload. The content/summary can be
+ *  either an array of objects ({type: "reasoning_text", text}, {type: "summary_text", text})
+ *  or a plain string. */
 function extractReasoningText(p: Record<string, any>): string | null {
   if (typeof p.summary === 'string' && p.summary.trim()) return p.summary;
+  if (Array.isArray(p.summary)) {
+    const texts = p.summary
+      .map((b: any) => (typeof b === 'string' ? b : b?.text ?? b?.summary ?? ''))
+      .filter((t: string) => typeof t === 'string' && t.trim());
+    if (texts.length) return texts.join('\n');
+  }
   if (Array.isArray(p.content)) {
     const texts = p.content
-      .filter((b: any) => b.type === 'reasoning_text' || b.type === 'text')
-      .map((b: any) => b.text ?? b.summary ?? '')
-      .filter((t: string) => t.trim());
+      .filter((b: any) => !b || b.type === 'reasoning_text' || b.type === 'text' || b.type === 'reasoning' || b.type === 'summary_text')
+      .map((b: any) => (typeof b === 'string' ? b : b?.text ?? b?.summary ?? ''))
+      .filter((t: string) => typeof t === 'string' && t.trim());
     if (texts.length) return texts.join('\n');
   }
   if (typeof p.content === 'string' && p.content.trim()) return p.content;
