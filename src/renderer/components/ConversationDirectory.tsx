@@ -10,6 +10,7 @@ import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
 import { copyMessageText, copyMessageJson } from '../utils/messageCopy';
 import { getVirtuosoRef } from '../hooks/virtuosoRef';
 import { useResizable } from '../hooks/useResizable';
+import { parseUserTextSegments } from '../utils/commandParser';
 import type { Message } from '../../main/model/types';
 
 // ─── Data model ───────────────────────────────────────────────────────────────
@@ -142,14 +143,49 @@ export function buildRounds(messages: Message[]): Round[] {
   return rounds;
 }
 
-/** Extract a short readable preview from a user message. */
-function userPreview(message?: Message): string {
+/** Strip any XML-tag-shaped content from raw text. Used by the
+ *  user-message preview so the directory shows what the user actually
+ *  typed instead of CLI-injected <command-name>, <task-notification>,
+ *  <environment_context>, etc. — known or unknown.
+ *  We deliberately do NOT parse the XML structure; we only remove it.
+ *  Structural parsing stays in commandParser for the chat flow where
+ *  type-aware rendering matters. */
+function stripXmlTags(text: string): string {
+  // Require every matched tag to start with a letter so we don't strip
+  // prose like "I <3 cats" or "x < 3". Three passes so we catch
+  // balanced pairs, self-closing, and any bare tags left over.
+  return text
+    .replace(/<([a-zA-Z][a-zA-Z0-9_-]*)[^<>]*>[\s\S]*?<\/\1>/g, ' ')
+    .replace(/<[a-zA-Z][a-zA-Z0-9_-]*[^<>]*\/>/g, ' ')
+    .replace(/<[a-zA-Z][a-zA-Z0-9_-]*[^<>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Extract a short readable preview from a user message. Runs the
+ *  commandParser the chat flow uses so the directory shows what the
+ *  user actually typed — not the <command-name> / <command-message>
+ *  XML that Claude Code prepends. Falls back to a generic XML strip
+ *  for tags the parser doesn't know (e.g. <task-notification>) so
+ *  the directory stays clean even when Claude Code adds new
+ *  injection shapes. Exported for tests. */
+export function userPreview(message?: Message): string {
   if (!message) return '系统/初始初始化';
   for (const block of message.content) {
-    if (block.type === 'text') {
-      const t = block.text.trim();
-      if (t) return t.slice(0, 100);
-    }
+    if (block.type !== 'text') continue;
+    // First pass: strip CLI-injected tags the parser recognises into
+    // typed segments (LocalCommandSegment, SystemReminderSegment,
+    // IdeContextSegment). Keep the text segments only.
+    const segments = parseUserTextSegments(block.text);
+    const knownText = segments
+      .flatMap((s) => (s.type === 'text' ? [s.text] : []))
+      .join(' ')
+      .trim();
+    // Second pass: strip any residual XML tags the parser didn't
+    // classify (e.g. <task-notification>, future unknowns). Plain
+    // < > removal is good enough for a 100-char preview.
+    const preview = stripXmlTags(knownText);
+    if (preview) return preview.slice(0, 100);
   }
   return '';
 }
