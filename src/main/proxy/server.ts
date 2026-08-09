@@ -19,16 +19,24 @@ export interface ProxyServer {
  * Start the proxy server. If `preferredPort` is already in use, tries
  * port+1, port+2, ... up to 20 attempts.
  *
- * If `expectedKey` is provided, /v1/messages requires the
+ * If `expectedKey` is provided, /v1/messages and /v1/responses require the
  * `x-dialogueviz-key` header to match. This is a *lightweight* local guard
  * against other processes on the same machine injecting requests into the
  * capture stream. It's NOT a real auth boundary — anyone with read access
  * to `~/.claude/.dialogueviz-secret` can mint the header. The threat model
  * is opportunistic same-host processes, not a determined attacker.
+ *
+ * The secret is plumbed through `ipc.ts`: it is (a) persisted to
+ * `~/.claude/.dialogueviz-secret` and (b) injected into the client's
+ * environment via `DIALOGUEVIZ_KEY` in `~/.claude/settings.json`. If the
+ * client doesn't pick up the env var (some terminal-launched CLIs don't
+ * re-read settings.json on each invocation), requests will be 403'd and
+ * the IPC layer is responsible for surfacing that.
  */
 export async function startProxyServer(
   preferredPort: number,
   upstreamOverride?: string,
+  expectedKey?: string,
 ): Promise<ProxyServer> {
   const upstream = upstreamOverride ?? detectUpstream();
   const emitter = new EventEmitter();
@@ -36,6 +44,23 @@ export async function startProxyServer(
 
   // Parse all bodies as raw buffers so we can forward them byte-for-byte.
   app.use('/v1', express.raw({ type: '*/*', limit: '100mb' }));
+
+  // Shared-secret gate. Reject anything that doesn't carry our header.
+  // Applied to both capture endpoints so neither Claude Code nor Codex
+  // traffic can be spoofed by an opportunistic same-host process.
+  if (expectedKey) {
+    const captureAuth: express.RequestHandler = (req, res, next) => {
+      const provided = req.header('x-dialogueviz-key');
+      if (provided !== expectedKey) {
+        res.status(403).json({ error: 'forbidden: missing or invalid x-dialogueviz-key' });
+        return;
+      }
+      next();
+    };
+    app.use('/v1/messages', captureAuth);
+    app.use('/v1/messages/count_tokens', captureAuth);
+    app.use('/v1/responses', captureAuth);
+  }
 
   app.post('/v1/messages', (req: express.Request, res: express.Response) => {
     void handleMessages(req, res, upstream, emitter);
@@ -118,6 +143,9 @@ const SKIPPED_REQUEST_HEADERS = new Set([
   'x-forwarded-port',
   'x-real-ip',
   'x-client-ip',
+  // Our own shared-secret header must NOT be forwarded — it would leak
+  // the proxy's auth credential to the upstream API provider.
+  'x-dialogueviz-key',
 ]);
 
 function isProxyInternalHeader(name: string): boolean {
