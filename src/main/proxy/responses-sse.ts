@@ -164,7 +164,19 @@ export function accumulateOpenaiResponsesSse(
         ?? null;
       if (fc) {
         let input: unknown;
-        try { input = JSON.parse(fc.args || '{}'); } catch { input = {}; }
+        const raw = (fc.args || '').trim();
+        if (raw) {
+          try {
+            input = JSON.parse(raw);
+          } catch (err) {
+            // G-3: keep the raw string so the user can still see what the
+            // model tried to call, even if the JSON is malformed.
+            console.warn('[sse] tool args JSON.parse failed, keeping raw string:', err);
+            input = raw;
+          }
+        } else {
+          input = {};
+        }
         content.push({ type: 'tool_use', id: fc.id, name: fc.name, input });
         functionCallArgs.delete(fc.id);
       } else {

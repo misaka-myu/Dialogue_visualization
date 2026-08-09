@@ -62,17 +62,15 @@ export function buildRoundTokenSeries(session: Session): RoundTokenData[] {
     const roundUserIdx = round.userIndex;
     const nextRound = rounds[idx + 1];
     const endUserIdx = nextRound ? nextRound.userIndex : Infinity;
-    const usages: TokenUsage[] = [];
-    for (const req of session.requests) {
-      if (
-        req.messageCount > roundUserIdx &&
-        req.messageCount <= endUserIdx &&
-        req.response?.usage
-      ) {
-        usages.push(req.response.usage);
-      }
-    }
-    const model = usages.find((u) => u.model)?.model;
+    // Collect requests that belong to this round — reused by both
+    // the real-usage path and the estimate path (for the model name).
+    const roundReqs = session.requests.filter(
+      (req) => req.messageCount > roundUserIdx && req.messageCount <= endUserIdx,
+    );
+    const usages = roundReqs
+      .map((req) => req.response?.usage)
+      .filter((u): u is TokenUsage => u != null);
+    const model = usages.find((u) => u.model)?.model ?? roundReqs.find((req) => req.model)?.model;
     if (usages.length > 0) {
       return {
         roundNumber: round.roundNumber,
@@ -115,6 +113,7 @@ export function buildRoundTokenSeries(session: Session): RoundTokenData[] {
       outputTokens: outputEstimate,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
+      model,
     };
   });
 }
