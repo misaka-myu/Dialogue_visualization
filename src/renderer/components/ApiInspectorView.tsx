@@ -3,10 +3,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../store';
 import { ApiRequest, Message, ContentBlock } from '../../main/model/types';
 import { CodeViewer } from './CodeViewer';
-import { MarkdownViewer } from './MarkdownViewer';
 import { HoverCopyBar } from './HoverCopyBar';
-import { UserTextSegments } from './CommandBlocks';
-import { parseUserTextSegments, hasLocalCommandTags } from '../utils/commandParser';
+import { ContentBlockView } from './ContentBlockView';
 import { formatTokenCount } from '../utils/tokens';
 import { findCurrentReq, findCurrentReqIndex } from '../utils/requestSelection';
 import '../styles/api-inspector.css';
@@ -319,7 +317,9 @@ export function ApiInspectorView() {
                     <div key={i} style={{ marginBottom: 12, padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
                       <span style={{ fontSize: 11, color: '#64b5f6', fontWeight: 600 }}>System Block #{i + 1}</span>
                       <div style={{ marginTop: 4 }}>
-                        {block.type === 'text' ? <MarkdownViewer content={block.text} /> : <CodeViewer value={JSON.stringify(block, null, 2)} language="json" />}
+                        {block.type === 'text'
+                          ? <ContentBlockView block={block} variant="default" />
+                          : <CodeViewer value={JSON.stringify(block, null, 2)} language="json" />}
                       </div>
                     </div>
                   ))
@@ -393,32 +393,7 @@ export function ApiInspectorView() {
                     <div style={{ padding: 8 }}>
                       {msg.content.map((b, bIdx) => (
                         <div key={bIdx} style={{ marginBottom: bIdx === msg.content.length - 1 ? 0 : 8 }}>
-                          {b.type === 'text' && (
-                            hasLocalCommandTags(b.text) ? (
-                              <UserTextSegments segments={parseUserTextSegments(b.text)} />
-                            ) : (
-                              <MarkdownViewer content={b.text} />
-                            )
-                          )}
-                          {b.type === 'thinking' && (
-                            <div style={{ padding: 6, background: 'rgba(206,147,216,0.08)', borderRadius: 4, fontSize: 11, color: '#ce93d8' }}>
-                              💭 思考: {b.thinking}
-                            </div>
-                          )}
-                          {b.type === 'tool_use' && (
-                            <div style={{ padding: 6, background: 'rgba(255,183,77,0.1)', borderRadius: 4, fontSize: 11, color: '#ffb74d' }}>
-                              🔧 Tool Call: {b.name}
-                              <pre style={{ margin: '4px 0 0', opacity: 0.8, fontSize: 10 }}>{JSON.stringify(b.input, null, 2)}</pre>
-                            </div>
-                          )}
-                          {b.type === 'tool_result' && (
-                            <div style={{ padding: 6, background: 'rgba(129,199,132,0.1)', borderRadius: 4, fontSize: 11, color: '#81c784' }}>
-                              📥 Tool Result ({b.toolUseId}):
-                              <pre style={{ margin: '4px 0 0', opacity: 0.8, fontSize: 10 }}>
-                                {typeof b.content === 'string' ? b.content : JSON.stringify(b.content, null, 2)}
-                              </pre>
-                            </div>
-                          )}
+                          <ContentBlockView block={b} variant="compact" />
                         </div>
                       ))}
                     </div>
