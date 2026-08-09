@@ -176,14 +176,16 @@ export function loadClaudeSession(path: string): Session {
   let lastTs: number | undefined;
 
   let badLineCount = 0;
-  for (const line of lines) {
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
     let obj: JsonlLine;
     try { obj = JSON.parse(line); } catch (err) {
       // B-4: rate-limit warnings to avoid spamming the console on a
       // catastrophic corruption (one warn per file, plus a final count).
+      // Include the line number so the user can jump to the corrupt row.
       badLineCount++;
       if (badLineCount <= 5) {
-        console.warn('[claude-log] unparseable JSONL line (file ' + path + '):', err);
+        console.warn('[claude-log] unparseable JSONL line at ' + (lineIdx + 1) + ' (file ' + path + '):', err);
       }
       continue;
     }

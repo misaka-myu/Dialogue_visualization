@@ -109,7 +109,8 @@ function quickParseCodexMeta(path: string): CodexSessionMeta | null {
     const text = readFileSync(path, 'utf-8');
     const lines = text.split('\n').filter((l) => l.trim()).slice(0, 10);
     const isArchived = path.includes('archived_sessions');
-    for (const line of lines) {
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
       let obj: CodexLine;
       try { obj = JSON.parse(line); } catch { continue; }
       if (obj.type === 'session_meta') {
@@ -176,14 +177,15 @@ export function loadCodexSession(path: string): Session {
 
   // B-4: counter used to throttle JSON.parse-failure warnings.
   let badLineCount = 0;
-  for (const line of lines) {
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
     let obj: CodexLine;
     // B-4: rate-limit warnings to avoid spamming the console on a corrupt
     // codex rollout. Cap per-line warnings at 5, then emit one summary.
     try { obj = JSON.parse(line); } catch (err) {
       badLineCount++;
       if (badLineCount <= 5) {
-        console.warn('[codex-log] unparseable JSONL line (file ' + path + '):', err);
+        console.warn('[codex-log] unparseable JSONL line at ' + (lineIdx + 1) + ' (file ' + path + '):', err);
       }
       continue;
     }
