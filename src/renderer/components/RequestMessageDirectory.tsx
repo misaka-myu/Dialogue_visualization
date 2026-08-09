@@ -32,15 +32,15 @@ function getMessagePreview(msg: Message): string {
 export function RequestMessageDirectory() {
   const session = useStore((s) => s.currentSession);
   const selectedRequestId = useStore((s) => s.selectedRequestId);
-  const directoryWidth = useStore((s) => s.directoryWidth);
-  const setDirectoryWidth = useStore((s) => s.setDirectoryWidth);
+  const directoryWidth = useStore((s) => s.inspectorDirectoryWidth);
+  const setDirectoryWidth = useStore((s) => s.setInspectorDirectoryWidth);
   const setDirectoryOpen = useStore((s) => s.setDirectoryOpen);
 
   const handleMouseDown = useResizable({
     side: 'right',
     minWidth: 160,
     maxWidth: 480,
-    storageKey: 'dialogueviz.directory.width',
+    storageKey: 'dialogueviz.inspector.directory.width',
     getWidth: () => directoryWidth,
     onWidthChange: setDirectoryWidth,
   });

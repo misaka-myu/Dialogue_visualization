@@ -43,6 +43,11 @@ interface State {
   /** Pixel width of the right conversation-directory column (when open).
    *  Same persistence story as sidebarWidth. */
   directoryWidth: number;
+  /** Pixel width of the right inspector-message directory column. Kept
+   *  separate from `directoryWidth` so a width pulled wide for the
+   *  chat-flow rounds view doesn't bleed into the API inspector's
+   *  per-message list (and vice versa). */
+  inspectorDirectoryWidth: number;
   setSessions: (s: SessionMeta[]) => void;
   setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
@@ -55,6 +60,7 @@ interface State {
   setToast: (message: string | null) => void;
   setSidebarWidth: (w: number) => void;
   setDirectoryWidth: (w: number) => void;
+  setInspectorDirectoryWidth: (w: number) => void;
   refreshSessions: () => Promise<void>;
   refreshLiveHistory: () => Promise<void>;
   refreshCodexSessions: () => Promise<void>;
@@ -120,6 +126,7 @@ export const useStore = create<State>((set, get) => ({
   toast: null,
   sidebarWidth: loadStoredWidth('dialogueviz.sidebar.width', 240, 160, 480),
   directoryWidth: loadStoredWidth('dialogueviz.directory.width', 240, 160, 480),
+  inspectorDirectoryWidth: loadStoredWidth('dialogueviz.inspector.directory.width', 260, 160, 480),
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
   setSelectedRequestId: (id) => set({ selectedRequestId: id }),
@@ -152,6 +159,7 @@ export const useStore = create<State>((set, get) => ({
   setToast: (message) => set({ toast: message }),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   setDirectoryWidth: (directoryWidth) => set({ directoryWidth }),
+  setInspectorDirectoryWidth: (inspectorDirectoryWidth) => set({ inspectorDirectoryWidth }),
   refreshSessions: async () => {
     const sessions = await window.api.listSessions();
     set({ sessions });
