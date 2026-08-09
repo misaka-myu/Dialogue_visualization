@@ -373,6 +373,20 @@ export function registerIpc(): void {
 // and drops a .dialogueviz-active marker that startup-time self-heal
 // can detect after a crash.
       backupIfNeeded('codex');
+      if (!existsSync(codexConfigPath())) {
+        // No config to back up — first-ever run is fine.
+      } else {
+        // We just attempted backup; verify it actually wrote. If not,
+        // we'd be rewriting config.toml without a snapshot to fall
+        // back to on crash.
+        const backedUp = existsSync(join(codexHome(), '.dialogueviz-config.bak'));
+        if (!backedUp) {
+          console.warn(
+            '[codex] failed to back up config.toml before starting capture;',
+            'config may be unrecoverable if the app crashes before stop.',
+          );
+        }
+      }
 
       // Start proxy with the real upstream. Strip to origin (e.g.
       // "https://api.minimaxi.com/v1" -> "https://api.minimaxi.com") so
@@ -516,6 +530,26 @@ export function registerIpc(): void {
       if (!existingSecret) writeStoredSecret(secret);
       savedSecret = secret;
 
+      // Snapshot the current (un-polluted) settings.json BEFORE we
+      // start the proxy. backupIfNeeded is a no-op when the active
+      // marker already exists — meaning we're already inside a
+      // crashed/never-restored capture, and the existing backup is
+      // still the real original we want to keep. Doing this before
+      // startProxyServer matches the order used in codex:start and
+      // shrinks the window where the proxy is live but the marker
+      // hasn't been written yet.
+      const backedUp = backupIfNeeded('claude-code');
+      if (!backedUp && existsSync(settingsPath)) {
+        // The config exists on disk but we couldn't snapshot it.
+        // Proceeding would still rewrite the user's settings; if we
+        // crash before stop, the next-boot self-heal has nothing to
+        // restore from. Warn loudly so the failure mode is visible.
+        console.warn(
+          '[proxy] failed to back up settings.json before starting capture;',
+          'settings may be unrecoverable if the app crashes before stop.',
+        );
+      }
+
       proxyServer = await startProxyServer(8787, upstream, secret);
       proxyServer.onCaptured((apiRequest) => {
         // Stream to renderer.
@@ -556,12 +590,6 @@ export function registerIpc(): void {
       // matching x-dialogueviz-key header. The proxy refuses requests
       // without it.
       settings.env.DIALOGUEVIZ_KEY = secret;
-      // Snapshot the current (un-polluted) settings.json before we
-      // overwrite it. backupIfNeeded is a no-op when the active
-      // marker already exists — meaning we're already inside a
-      // crashed/never-restored capture, and the existing backup is
-      // still the real original we want to keep.
-      backupIfNeeded('claude-code');
       try {
         writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
       } catch (err) {
@@ -592,6 +620,7 @@ export function registerIpc(): void {
     if (liveRuntime) {
       liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
       flushLiveSave();
+      liveRuntime = null;
     }
     savedSecret = null;
   });

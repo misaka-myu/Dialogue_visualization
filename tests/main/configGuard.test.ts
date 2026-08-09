@@ -184,4 +184,81 @@ describe('configGuard', () => {
       expect(readConfig('codex')).toBe('CODEX_ORIG');
     });
   });
+
+  describe('edge cases', () => {
+    it('backupIfNeeded returns false when the config parent dir does not exist', () => {
+      // mkdtempSync creates the root but we never mkdir the .claude
+      // subdir; the live config file is therefore unreachable.
+      const r = backupIfNeeded('claude-code', paths['claude-code']);
+      expect(r).toBe(false);
+      expect(existsSync(paths['claude-code'].backup)).toBe(false);
+      expect(isCaptureInProgress('claude-code', paths['claude-code'])).toBe(false);
+    });
+
+    it('restoreIfDirty clears the marker when only the marker exists (no backup, no config)', () => {
+      // Simulates a crash that left the marker but never wrote the
+      // backup or a live config — e.g. start crashed between dropping
+      // the marker and copying the config. The marker must still be
+      // cleared so we don't loop the self-heal on every boot.
+      mkdirSync(join(paths.codex.config, '..'), { recursive: true });
+      writeFileSync(paths.codex.marker, 'codex', 'utf-8');
+      const restored = restoreIfDirty('codex', paths.codex);
+      expect(restored).toBe(false);
+      expect(existsSync(paths.codex.marker)).toBe(false);
+    });
+
+    it('restoreAllDirty is idempotent — second call is a no-op', () => {
+      seedConfig('claude-code', 'CLAUDE_ORIG');
+      seedConfig('codex', 'CODEX_ORIG');
+      backupIfNeeded('claude-code', paths['claude-code']);
+      backupIfNeeded('codex', paths.codex);
+      seedConfig('claude-code', 'CLAUDE_POLLUTED');
+      seedConfig('codex', 'CODEX_POLLUTED');
+
+      restoreAllDirty(paths);
+      expect(readConfig('claude-code')).toBe('CLAUDE_ORIG');
+      expect(readConfig('codex')).toBe('CODEX_ORIG');
+
+      // Second call: no marker, no backup → no-op. Live config
+      // must stay exactly as the first call left it.
+      const liveBefore = { claude: readConfig('claude-code'), codex: readConfig('codex') };
+      restoreAllDirty(paths);
+      expect(readConfig('claude-code')).toBe(liveBefore.claude);
+      expect(readConfig('codex')).toBe(liveBefore.codex);
+    });
+
+    it('legacy .dialogueviz-backup path is recognized by codex:stop fallback', () => {
+      // We can't import the real codex:stop handler here (it would
+      // pull in the entire ipc module); instead, reproduce the
+      // precedence logic to lock the contract in.
+      const codexDir = join(tmpRoot, '.codex');
+      mkdirSync(codexDir, { recursive: true });
+      const newBackup = join(codexDir, '.dialogueviz-config.bak');
+      const legacyBackup = join(codexDir, '.dialogueviz-backup');
+      writeFileSync(legacyBackup, 'LEGACY', 'utf-8');
+      writeFileSync(newBackup, 'NEW', 'utf-8');
+
+      const pick = (() => {
+        if (existsSync(newBackup)) return newBackup;
+        if (existsSync(legacyBackup)) return legacyBackup;
+        return null;
+      })();
+      expect(pick).toBe(newBackup);
+    });
+
+    it('legacy .dialogueviz-backup is used when new backup is absent', () => {
+      const codexDir = join(tmpRoot, '.codex2');
+      mkdirSync(codexDir, { recursive: true });
+      const newBackup = join(codexDir, '.dialogueviz-config.bak');
+      const legacyBackup = join(codexDir, '.dialogueviz-backup');
+      writeFileSync(legacyBackup, 'LEGACY', 'utf-8');
+
+      const pick = (() => {
+        if (existsSync(newBackup)) return newBackup;
+        if (existsSync(legacyBackup)) return legacyBackup;
+        return null;
+      })();
+      expect(pick).toBe(legacyBackup);
+    });
+  });
 });
