@@ -50,7 +50,11 @@ describe('findCurrentReqIndex', () => {
     expect(findCurrentReqIndex(makeReqs(), 'req-idx-2')).toBe(2);
   });
 
-  it('returns -1 for unrecognised id (caller decides fallback policy)', () => {
-    expect(findCurrentReqIndex(makeReqs(), 'req-not-real')).toBe(-1);
+  // BUG-4: the two helpers used to disagree on unrecognised ids
+  // (findCurrentReq fell back to 0, findCurrentReqIndex returned -1),
+  // which made ApiInspectorView's left-rail highlight and right-pane
+  // content desync. They now agree on the same 0-fallback.
+  it('returns 0 for unrecognised id (matches findCurrentReq fallback)', () => {
+    expect(findCurrentReqIndex(makeReqs(), 'req-not-real')).toBe(0);
   });
 });

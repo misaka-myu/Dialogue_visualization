@@ -121,7 +121,12 @@ interface LiveRuntime {
   lastSize: number;
 }
 let liveRuntime: LiveRuntime | null = null;
-const SAVE_DEBOUNCE_MS = 500;
+// E-1 fix: shrink the debounce window so a force-kill (SIGKILL / Task Manager
+// End-Task) has a much smaller blast radius. 500ms was a perf optimisation; 100ms
+// still batches rapid request bursts and shrinks worst-case data loss from
+// "half a second of capture" to "a tenth of a second". The before-quit hook
+// below still does a final synchronous flush so the common case is unchanged.
+const SAVE_DEBOUNCE_MS = 100;
 
 function ensureLiveStore(): PersistentLiveStore {
   if (!liveStore) liveStore = new PersistentLiveStore(claudeProjectsDir());
