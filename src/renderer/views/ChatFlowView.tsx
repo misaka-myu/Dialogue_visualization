@@ -3,78 +3,12 @@ import { useState, useMemo, useCallback, useRef } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useStore } from '../store';
 import { ContentBlock } from '../../main/model/types';
-import { CodeViewer, languageFromPath } from '../components/CodeViewer';
 import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
 import { setVirtuosoRef } from '../hooks/virtuosoRef';
 
-import { MarkdownViewer } from '../components/MarkdownViewer';
-
-function Block({ block, lang }: { block: ContentBlock; lang?: string }) {
-  switch (block.type) {
-    case 'text':
-      return <MarkdownViewer content={block.text} />;
-    case 'tool_use':
-      return (
-        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
-          <span>🔧 <strong>tool_use: {block.name}</strong></span>
-          <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-            {JSON.stringify(block.input, null, 2)}
-          </pre>
-        </div>
-      );
-    case 'tool_result': {
-      const raw = typeof block.content === 'string' ? block.content : JSON.stringify(block.content, null, 2);
-      return (
-        <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(129,199,132,0.1)', borderLeft: '3px solid #81c784', borderRadius: '0 4px 4px 0', fontSize: 12 }}>
-          <span style={{ color: '#81c784', fontWeight: 600 }}>📥 tool_result</span>
-          <div style={{ marginTop: 4 }}>
-            <CodeViewer value={raw} language={lang} />
-          </div>
-        </div>
-      );
-    }
-    case 'thinking':
-      return <ThinkingBlock text={block.thinking} signature={block.signature} />;
-    default:
-      return null;
-  }
-}
-
-function ThinkingBlock({ text, signature }: { text: string; signature?: string }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const charLen = text.length;
-  const tokEstimate = Math.ceil(charLen / 4);
-
-  return (
-    <div style={{ marginTop: 4, background: 'rgba(206,147,216,0.08)', border: '1px solid rgba(206,147,216,0.2)', borderRadius: 4, fontSize: 12 }}>
-      {/* Header bar */}
-      <div
-        onClick={() => setCollapsed(!collapsed)}
-        style={{
-          padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 6,
-          cursor: 'pointer', userSelect: 'none', background: 'rgba(206,147,216,0.06)',
-          color: '#ce93d8', fontWeight: 600, fontSize: 11,
-        }}
-      >
-        <span>💭 思考过程</span>
-        <span style={{ opacity: 0.6, fontSize: 10 }}>· {charLen} 字 (≈{tokEstimate} tok)</span>
-        {signature && (
-          <span style={{ fontSize: 9, opacity: 0.6, background: 'rgba(256,256,256,0.1)', padding: '1px 4px', borderRadius: 3 }}>
-            🔒 已校验签名
-          </span>
-        )}
-        <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{collapsed ? '▶ 展开' : '▼ 收起'}</span>
-      </div>
-
-      {/* Body */}
-      {!collapsed && (
-        <div style={{ padding: '6px 10px', opacity: 0.9, lineHeight: 1.45, borderTop: '1px dashed rgba(206,147,216,0.15)' }}>
-          {text ? <MarkdownViewer content={text} /> : <span style={{ opacity: 0.4 }}>(未捕获到具体思考文本)</span>}
-        </div>
-      )}
-    </div>
-  );
-}
+import { HoverCopyBar } from '../components/HoverCopyBar';
+import { ContentBlockView } from '../components/ContentBlockView';
+import { languageFromPath } from '../components/CodeViewer';
 
 function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: ContentBlock[]; meta?: import('../../main/model/types').MessageMeta; toolUseLangs?: Map<string, string> }) {
   const [open, setOpen] = useState(true);
@@ -88,8 +22,10 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
   const tok = getMessageTokenInfo({ role: role as import('../../main/model/types').Role, content: blocks, meta });
   const tokLabel = `${formatTokenCount(tok.count)} tok ${tok.real ? '✓' : '≈'}`;
   const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
+  const msgObj = { role: role as import('../../main/model/types').Role, content: blocks, meta };
+
   return (
-    <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
+    <div className="message-container" style={{ position: 'relative', background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
       <div
         onClick={() => setOpen(!open)}
         style={{ fontSize: 10, fontWeight: 600, opacity: 0.7, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
@@ -101,10 +37,13 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
         {meta?.isSidechain && <span style={{ color: '#ff8a65' }}>↳ 侧链</span>}
         {ts && <span style={{ opacity: 0.5 }}>{ts}</span>}
         {meta?.gitBranch && <span style={{ opacity: 0.5 }}>🌿 {meta.gitBranch}</span>}
+        <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          <HoverCopyBar message={msgObj} />
+        </div>
       </div>
       {open && blocks.map((b, i) => {
         const lang = b.type === 'tool_result' ? toolUseLangs?.get(b.toolUseId) : undefined;
-        return <Block key={i} block={b} lang={lang} />;
+        return <ContentBlockView key={i} block={b} lang={lang} variant="default" />;
       })}
     </div>
   );
@@ -167,7 +106,7 @@ export function ChatFlowView() {
           </button>
           {systemOpen && (
             <div style={{ maxHeight: '40vh', overflow: 'auto', marginTop: 4, padding: '8px 12px', background: 'rgba(255,183,77,0.08)', borderBottom: '1px solid #333', borderRadius: 4 }}>
-              {system.map((b, i) => <Block key={i} block={b} />)}
+              {system.map((b, i) => <ContentBlockView key={i} block={b} variant="default" />)}
             </div>
           )}
         </div>

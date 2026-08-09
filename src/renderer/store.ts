@@ -5,7 +5,7 @@ import { SessionMeta } from '../main/adapters/claude-log';
 import { CodexSessionMeta } from '../main/adapters/codex-log';
 import { LiveMeta } from '../main/store/persistent-store';
 
-export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log';
+export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log' | 'api-inspector';
 
 interface State {
   sessions: SessionMeta[];
@@ -14,6 +14,8 @@ interface State {
   /** Past proxy-live captures, newest first. */
   liveHistory: LiveMeta[];
   currentSession: Session | null;
+  /** Selected request ID in API Inspector mode */
+  selectedRequestId: string | null;
   /** The file path the user most recently opened from the sidebar (proxy-live
    *  capture path or Claude Code JSONL path). Used to clear `currentSession`
    *  when the underlying file is deleted. */
@@ -41,9 +43,15 @@ interface State {
   /** Pixel width of the right conversation-directory column (when open).
    *  Same persistence story as sidebarWidth. */
   directoryWidth: number;
+  /** Pixel width of the right inspector-message directory column. Kept
+   *  separate from `directoryWidth` so a width pulled wide for the
+   *  chat-flow rounds view doesn't bleed into the API inspector's
+   *  per-message list (and vice versa). */
+  inspectorDirectoryWidth: number;
   setSessions: (s: SessionMeta[]) => void;
   setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
+  setSelectedRequestId: (id: string | null) => void;
   setCurrentRequest: (r: ApiRequest | null) => void;
   setCurrentView: (v: ViewKind) => void;
   setLoading: (b: boolean) => void;
@@ -52,6 +60,7 @@ interface State {
   setToast: (message: string | null) => void;
   setSidebarWidth: (w: number) => void;
   setDirectoryWidth: (w: number) => void;
+  setInspectorDirectoryWidth: (w: number) => void;
   refreshSessions: () => Promise<void>;
   refreshLiveHistory: () => Promise<void>;
   refreshCodexSessions: () => Promise<void>;
@@ -104,6 +113,7 @@ export const useStore = create<State>((set, get) => ({
   codexSessions: [],
   liveHistory: [],
   currentSession: null,
+  selectedRequestId: null,
   openSourcePath: null,
   liveSession: null,
   currentRequest: null,
@@ -116,12 +126,15 @@ export const useStore = create<State>((set, get) => ({
   toast: null,
   sidebarWidth: loadStoredWidth('dialogueviz.sidebar.width', 240, 160, 480),
   directoryWidth: loadStoredWidth('dialogueviz.directory.width', 240, 160, 480),
+  inspectorDirectoryWidth: loadStoredWidth('dialogueviz.inspector.directory.width', 260, 160, 480),
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
+  setSelectedRequestId: (id) => set({ selectedRequestId: id }),
   setCurrentSession: (s) => {
     const req = s?.requests[0] ?? null;
     set({
       currentSession: s,
+      selectedRequestId: req?.id ?? null,
       currentRequest: req,
       currentRequestMessages: deriveMessages(s, req),
       // No file path is associated with a programmatic session change
@@ -146,6 +159,7 @@ export const useStore = create<State>((set, get) => ({
   setToast: (message) => set({ toast: message }),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   setDirectoryWidth: (directoryWidth) => set({ directoryWidth }),
+  setInspectorDirectoryWidth: (inspectorDirectoryWidth) => set({ inspectorDirectoryWidth }),
   refreshSessions: async () => {
     const sessions = await window.api.listSessions();
     set({ sessions });

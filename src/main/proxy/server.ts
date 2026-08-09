@@ -19,12 +19,19 @@ export interface ProxyServer {
  * Start the proxy server. If `preferredPort` is already in use, tries
  * port+1, port+2, ... up to 20 attempts.
  *
- * If `expectedKey` is provided, /v1/messages requires the
+ * If `expectedKey` is provided, /v1/messages and /v1/responses require the
  * `x-dialogueviz-key` header to match. This is a *lightweight* local guard
  * against other processes on the same machine injecting requests into the
  * capture stream. It's NOT a real auth boundary — anyone with read access
  * to `~/.claude/.dialogueviz-secret` can mint the header. The threat model
  * is opportunistic same-host processes, not a determined attacker.
+ *
+ * The secret is plumbed through `ipc.ts`: it is (a) persisted to
+ * `~/.claude/.dialogueviz-secret` and (b) injected into the client's
+ * environment via `DIALOGUEVIZ_KEY` in `~/.claude/settings.json`. If the
+ * client doesn't pick up the env var (some terminal-launched CLIs don't
+ * re-read settings.json on each invocation), requests will be 403'd and
+ * the IPC layer is responsible for surfacing that.
  */
 export async function startProxyServer(
   preferredPort: number,
@@ -38,26 +45,28 @@ export async function startProxyServer(
   // Parse all bodies as raw buffers so we can forward them byte-for-byte.
   app.use('/v1', express.raw({ type: '*/*', limit: '100mb' }));
 
-  // Shared-secret check for the capture endpoint. Only enforced when the
-  // caller actually generated a key (i.e. we wrote one to settings.json).
-  // passthrough routes (count_tokens, models) stay open — they don't write
-  // anything to the capture.
-  const captureAuth = expectedKey
-    ? (req: express.Request, res: express.Response, next: express.NextFunction): void => {
-        const got = req.headers['x-dialogueviz-key'];
-        if (typeof got !== 'string' || got !== expectedKey) {
-          res.status(403).json({ error: 'forbidden: missing or invalid x-dialogueviz-key' });
-          return;
-        }
-        next();
+  // Shared-secret gate. Reject anything that doesn't carry our header.
+  // Applied to both capture endpoints so neither Claude Code nor Codex
+  // traffic can be spoofed by an opportunistic same-host process.
+  if (expectedKey) {
+    const captureAuth: express.RequestHandler = (req, res, next) => {
+      const provided = req.header('x-dialogueviz-key');
+      if (provided !== expectedKey) {
+        res.status(403).json({ error: 'forbidden: missing or invalid x-dialogueviz-key' });
+        return;
       }
-    : (_req: express.Request, _res: express.Response, next: express.NextFunction): void => next();
+      next();
+    };
+    app.use('/v1/messages', captureAuth);
+    app.use('/v1/messages/count_tokens', captureAuth);
+    app.use('/v1/responses', captureAuth);
+  }
 
-  app.post('/v1/messages', captureAuth, (req: express.Request, res: express.Response) => {
+  app.post('/v1/messages', (req: express.Request, res: express.Response) => {
     void handleMessages(req, res, upstream, emitter);
   });
 
-  app.post('/v1/responses', captureAuth, (req: express.Request, res: express.Response) => {
+  app.post('/v1/responses', (req: express.Request, res: express.Response) => {
     void handleResponses(req, res, upstream, emitter);
   });
 
@@ -76,6 +85,14 @@ export async function startProxyServer(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       server = await listenOnPort(app, port);
+      // Resolve the OS-assigned port when binding to 0 (or anything
+      // the kernel remapped). Without this, callers using port 0 to
+      // let the OS pick a free port would get back `0` and their
+      // fetch() calls would target the wrong socket.
+      const addr = server.address();
+      if (addr && typeof addr === 'object') {
+        port = addr.port;
+      }
       break;
     } catch (err: any) {
       if (err?.code === 'EADDRINUSE' && attempt < maxAttempts - 1) {
@@ -102,7 +119,11 @@ export async function startProxyServer(
 
 function listenOnPort(app: express.Express, port: number): Promise<HttpServer> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(port);
+    // Pin to IPv4 loopback. Without this, Node listens on `::` (IPv6) on
+    // most platforms, which on dual-stack boxes makes `127.0.0.1:<port>`
+    // fetch calls fail with EADDRNOTAVAIL. We never want to be reachable
+    // outside localhost anyway.
+    const server = app.listen(port, '127.0.0.1');
     server.once('listening', () => resolve(server));
     server.once('error', reject);
   });
@@ -134,6 +155,8 @@ const SKIPPED_REQUEST_HEADERS = new Set([
   'x-forwarded-port',
   'x-real-ip',
   'x-client-ip',
+  // Our own shared-secret header must NOT be forwarded — it would leak
+  // the proxy's auth credential to the upstream API provider.
   'x-dialogueviz-key',
 ]);
 

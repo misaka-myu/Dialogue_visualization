@@ -105,6 +105,7 @@ function escapeRegex(s: string): string {
 
 let proxyServer: ProxyServer | null = null;
 let savedBaseUrl: string | undefined | null = null;  // null = not captured yet; undefined = key absent
+let savedSecret: string | null = null;
 
 // --- Live-capture persistence state (module scope; single capture at a time) ---
 let liveStore: PersistentLiveStore | null = null;
@@ -488,10 +489,16 @@ export function registerIpc(): void {
       }
       savedBaseUrl = upstream;
 
-      // Start proxy with the real upstream. Generate a fresh shared secret (or
-      // reuse the persisted one) so /v1/messages requires x-dialogueviz-key.
-      const secret = readStoredSecret() ?? randomUUID();
-      writeStoredSecret(secret);
+      // Start proxy with the real upstream.
+      // Provision (or reuse) a per-machine shared secret. Persisted across
+      // restarts so a long-running Claude Code session doesn't get a new
+      // key mid-capture. The key is also injected into the Claude Code
+      // settings env below, so the client can mint the matching header.
+      const existingSecret = readStoredSecret();
+      const secret = existingSecret ?? randomUUID();
+      if (!existingSecret) writeStoredSecret(secret);
+      savedSecret = secret;
+
       proxyServer = await startProxyServer(8787, upstream, secret);
       proxyServer.onCaptured((apiRequest) => {
         // Stream to renderer.
@@ -528,6 +535,10 @@ export function registerIpc(): void {
       const proxyUrl = `http://localhost:${proxyServer.port}`;
       settings.env = settings.env ?? {};
       settings.env.ANTHROPIC_BASE_URL = proxyUrl;
+      // Inject the shared-secret so the Claude Code CLI can mint the
+      // matching x-dialogueviz-key header. The proxy refuses requests
+      // without it.
+      settings.env.DIALOGUEVIZ_KEY = secret;
       try {
         writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
       } catch (err) {
@@ -574,6 +585,7 @@ export function registerIpc(): void {
       liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
       flushLiveSave();
     }
+    savedSecret = null;
   });
 
   ipcMain.handle('proxy:launch-claude', async (_e, port: number): Promise<{ pid: number } | null> => {
