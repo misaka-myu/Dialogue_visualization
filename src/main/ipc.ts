@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { ApiRequest, Session } from './model/types';
 import { startProxyServer, ProxyServer } from './proxy/server';
 import { PersistentLiveStore, LiveMeta, generateLiveFileName, LIVE_FILE_WARN_BYTES } from './store/persistent-store';
+import { backupIfNeeded, restoreOnStop, restoreAllOnStop } from './configGuard';
 
 function claudeProjectsDir(): string {
   return join(homedir(), '.claude', 'projects');
@@ -366,8 +367,26 @@ export function registerIpc(): void {
         writeStoredCodexUpstream(originalBaseUrl);
       }
 
-      // Save original config for restore on stop
-      writeFileSync(codexBackupPath(), originalConfig, 'utf-8');
+      // Save original config for restore on stop. backupIfNeeded
+// unifies backup + marker management with Claude Code: writes
+// .dialogueviz-config.bak only if no capture is currently active,
+// and drops a .dialogueviz-active marker that startup-time self-heal
+// can detect after a crash.
+      backupIfNeeded('codex');
+      if (!existsSync(codexConfigPath())) {
+        // No config to back up — first-ever run is fine.
+      } else {
+        // We just attempted backup; verify it actually wrote. If not,
+        // we'd be rewriting config.toml without a snapshot to fall
+        // back to on crash.
+        const backedUp = existsSync(join(codexHome(), '.dialogueviz-config.bak'));
+        if (!backedUp) {
+          console.warn(
+            '[codex] failed to back up config.toml before starting capture;',
+            'config may be unrecoverable if the app crashes before stop.',
+          );
+        }
+      }
 
       // Start proxy with the real upstream. Strip to origin (e.g.
       // "https://api.minimaxi.com/v1" -> "https://api.minimaxi.com") so
@@ -424,14 +443,20 @@ export function registerIpc(): void {
       await proxyServer.stop();
       proxyServer = null;
     }
-    // Restore config.toml from backup. If the backup itself is broken
-    // (pointing at localhost - can happen if start ran on an already-polluted
-    // config), fall back to the durable upstream.
-    const backupPath = codexBackupPath();
-    if (existsSync(backupPath)) {
+    // Restore config.toml from backup. Prefer the new .bak path
+    // written by configGuard, but fall back to the legacy
+    // .dialogueviz-backup for users who started a capture under an
+    // older version. If the backup itself is broken (pointing at
+    // localhost), patch it with the durable upstream file.
+    const codexDir = join(codexHome());
+    const newBackup = join(codexDir, '.dialogueviz-config.bak');
+    const legacyBackup = codexBackupPath();
+    const backupPath = existsSync(newBackup) ? newBackup
+      : existsSync(legacyBackup) ? legacyBackup
+      : null;
+    if (backupPath) {
       try {
         let original = readFileSync(backupPath, 'utf-8');
-        // Check if backup's base_url is localhost (broken)
         if (original.includes('base_url = "http://localhost')) {
           const stored = readStoredCodexUpstream();
           if (stored) {
@@ -446,6 +471,12 @@ export function registerIpc(): void {
         console.error('[codex] failed to restore config.toml:', err);
       }
     }
+    // Drop the active marker regardless of whether we successfully
+    // restored, so a corrupt backup doesn't keep us in "needs heal"
+    // state forever. Self-heal on next boot will surface a stale
+    // marker but the file will have been overwritten by the write
+    // above (or left alone if no backup existed).
+    restoreOnStop('codex');
     // Flush the live session with endedAt
     if (liveRuntime) {
       liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
@@ -498,6 +529,26 @@ export function registerIpc(): void {
       const secret = existingSecret ?? randomUUID();
       if (!existingSecret) writeStoredSecret(secret);
       savedSecret = secret;
+
+      // Snapshot the current (un-polluted) settings.json BEFORE we
+      // start the proxy. backupIfNeeded is a no-op when the active
+      // marker already exists — meaning we're already inside a
+      // crashed/never-restored capture, and the existing backup is
+      // still the real original we want to keep. Doing this before
+      // startProxyServer matches the order used in codex:start and
+      // shrinks the window where the proxy is live but the marker
+      // hasn't been written yet.
+      const backedUp = backupIfNeeded('claude-code');
+      if (!backedUp && existsSync(settingsPath)) {
+        // The config exists on disk but we couldn't snapshot it.
+        // Proceeding would still rewrite the user's settings; if we
+        // crash before stop, the next-boot self-heal has nothing to
+        // restore from. Warn loudly so the failure mode is visible.
+        console.warn(
+          '[proxy] failed to back up settings.json before starting capture;',
+          'settings may be unrecoverable if the app crashes before stop.',
+        );
+      }
 
       proxyServer = await startProxyServer(8787, upstream, secret);
       proxyServer.onCaptured((apiRequest) => {
@@ -557,33 +608,19 @@ export function registerIpc(): void {
       await proxyServer.stop();
       proxyServer = null;
     }
-    // Restore settings.json to the REAL original upstream (savedBaseUrl).
-    if (savedBaseUrl !== null) {
-      const settingsPath = claudeSettingsPath();
-      if (existsSync(settingsPath)) {
-        try {
-          const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-          settings.env = settings.env ?? {};
-          if (savedBaseUrl === undefined) {
-            delete settings.env.ANTHROPIC_BASE_URL;
-          } else {
-            settings.env.ANTHROPIC_BASE_URL = savedBaseUrl;
-          }
-          // Drop the proxy's shared-secret env var too — it has no use
-          // outside an active capture and shouldn't linger in settings.
-          delete settings.env.DIALOGUEVIZ_KEY;
-          writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-        } catch (err) {
-          console.error('[proxy] failed to restore settings.json:', err);
-        }
-      }
-      savedBaseUrl = null;
-    }
+    // Restore settings.json from the snapshot we took on proxy:start.
+    // ConfigGuard handles the marker dance: if the backup is missing
+    // (e.g. start never reached the backup step) the marker is still
+    // cleared so we don't trigger a self-heal on next boot for no
+    // reason. The runtime fields (savedBaseUrl, savedSecret) are
+    // intentionally left untouched — they're only used by proxy:start.
+    restoreOnStop('claude-code');
     // Final flush of the live capture so the on-disk file reflects the full
     // session, including `endedAt`.
     if (liveRuntime) {
       liveRuntime.session = { ...liveRuntime.session, endedAt: Date.now() };
       flushLiveSave();
+      liveRuntime = null;
     }
     savedSecret = null;
   });
@@ -615,12 +652,16 @@ export function flushPendingLiveSession(): void {
   }
 }
 
-// Auto-register the quit hook so we never lose a capture to a hard close.
+// Auto-register the quit hook so we never lose a capture to a hard close,
+// and always restore the user's settings.json / config.toml before exit.
+// Startup-time self-heal (see index.ts) covers the SIGKILL case; this
+// hook is the fast-path for normal exits.
 let quitHookInstalled = false;
 export function installLiveStoreQuitHook(): void {
   if (quitHookInstalled) return;
   quitHookInstalled = true;
   app.on('before-quit', () => {
     flushPendingLiveSession();
+    restoreAllOnStop();
   });
 }

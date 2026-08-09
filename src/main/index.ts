@@ -2,6 +2,7 @@
 import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
 import { registerIpc, installLiveStoreQuitHook } from './ipc';
+import { restoreAllDirty } from './configGuard';
 
 // Disable GPU shader disk cache to prevent Windows file-lock errors (ERROR:cache_util_win.cc 0x5)
 // when restarting Electron multiple times in development mode.
@@ -37,6 +38,13 @@ function createWindow(): void {
     win.loadFile(join(__dirname, '../renderer/index.html'));
   }
 }
+
+// Startup-time self-heal: if a previous run crashed (or the OS killed
+// us) mid-capture, the .dialogueviz-active marker is still in place
+// and the user's settings.json / config.toml is pointing at a dead
+// localhost proxy. Restore before the renderer comes up so the UI
+// never observes the polluted state and the CLI tools stay usable.
+restoreAllDirty();
 
 app.whenReady().then(() => {
   installLiveStoreQuitHook();
