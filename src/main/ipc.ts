@@ -488,11 +488,8 @@ export function registerIpc(): void {
       }
       savedBaseUrl = upstream;
 
-      // Start proxy with the real upstream. Generate a fresh shared secret (or
-      // reuse the persisted one) so /v1/messages requires x-dialogueviz-key.
-      const secret = readStoredSecret() ?? randomUUID();
-      writeStoredSecret(secret);
-      proxyServer = await startProxyServer(8787, upstream, secret);
+      // Start proxy with the real upstream.
+      proxyServer = await startProxyServer(8787, upstream);
       proxyServer.onCaptured((apiRequest) => {
         // Stream to renderer.
         const windows = BrowserWindow.getAllWindows();

@@ -13,3 +13,17 @@ button { font-family: inherit; }
 [role="button"]:hover .directory-row-trigger,
 .directory-row-trigger:focus,
 .directory-row-trigger[aria-expanded="true"] { opacity: 1; }
+
+/* Hover copy bar logic for message containers */
+.message-container .hover-copy-bar,
+.api-inspector-msg-card .hover-copy-bar {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease-in-out;
+}
+
+.message-container:hover .hover-copy-bar,
+.api-inspector-msg-card:hover .hover-copy-bar {
+  opacity: 1;
+  pointer-events: auto;
+}

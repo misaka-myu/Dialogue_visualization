@@ -5,7 +5,7 @@ import { SessionMeta } from '../main/adapters/claude-log';
 import { CodexSessionMeta } from '../main/adapters/codex-log';
 import { LiveMeta } from '../main/store/persistent-store';
 
-export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log';
+export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log' | 'api-inspector';
 
 interface State {
   sessions: SessionMeta[];
@@ -14,6 +14,8 @@ interface State {
   /** Past proxy-live captures, newest first. */
   liveHistory: LiveMeta[];
   currentSession: Session | null;
+  /** Selected request ID in API Inspector mode */
+  selectedRequestId: string | null;
   /** The file path the user most recently opened from the sidebar (proxy-live
    *  capture path or Claude Code JSONL path). Used to clear `currentSession`
    *  when the underlying file is deleted. */
@@ -44,6 +46,7 @@ interface State {
   setSessions: (s: SessionMeta[]) => void;
   setLiveHistory: (l: LiveMeta[]) => void;
   setCurrentSession: (s: Session | null) => void;
+  setSelectedRequestId: (id: string | null) => void;
   setCurrentRequest: (r: ApiRequest | null) => void;
   setCurrentView: (v: ViewKind) => void;
   setLoading: (b: boolean) => void;
@@ -104,6 +107,7 @@ export const useStore = create<State>((set, get) => ({
   codexSessions: [],
   liveHistory: [],
   currentSession: null,
+  selectedRequestId: null,
   openSourcePath: null,
   liveSession: null,
   currentRequest: null,
@@ -118,10 +122,12 @@ export const useStore = create<State>((set, get) => ({
   directoryWidth: loadStoredWidth('dialogueviz.directory.width', 240, 160, 480),
   setSessions: (s) => set({ sessions: s }),
   setLiveHistory: (l) => set({ liveHistory: l }),
+  setSelectedRequestId: (id) => set({ selectedRequestId: id }),
   setCurrentSession: (s) => {
     const req = s?.requests[0] ?? null;
     set({
       currentSession: s,
+      selectedRequestId: req?.id ?? null,
       currentRequest: req,
       currentRequestMessages: deriveMessages(s, req),
       // No file path is associated with a programmatic session change

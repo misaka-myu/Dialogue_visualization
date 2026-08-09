@@ -6,7 +6,10 @@ import { JsonTreeView } from './views/JsonTreeView';
 import { ChatFlowView } from './views/ChatFlowView';
 import { RawLogView } from './views/RawLogView';
 import { ConversationDirectory } from './components/ConversationDirectory';
+import { RequestMessageDirectory } from './components/RequestMessageDirectory';
 import { useStore } from './store';
+
+import { ApiInspectorView } from './components/ApiInspectorView';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null };
@@ -38,16 +41,18 @@ function Toast() {
       role="status"
       style={{
         position: 'fixed',
-        top: 16,
+        bottom: 24,
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: 1000,
-        padding: '8px 16px',
-        background: 'rgba(40,40,40,0.95)',
-        border: '1px solid #555',
-        borderRadius: 4,
+        padding: '6px 16px',
+        background: 'rgba(25, 25, 25, 0.92)',
+        backdropFilter: 'blur(8px)',
+        border: '1px solid rgba(255, 255, 255, 0.15)',
+        borderRadius: 20,
         fontSize: 12,
-        boxShadow: '0 2px 12px rgba(0,0,0,0.6)',
+        color: '#e0e0e0',
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.6)',
         pointerEvents: 'none',
       }}
     >
@@ -77,6 +82,8 @@ export function App() {
                   <JsonTreeView />
                 ) : currentView === 'raw-log' ? (
                   <RawLogView />
+                ) : currentView === 'api-inspector' ? (
+                  <ApiInspectorView />
                 ) : (
                   <ChatFlowView />
                 )}
@@ -84,7 +91,7 @@ export function App() {
             )}
           </div>
         </div>
-        {directoryOpen && <ConversationDirectory />}
+        {directoryOpen && (currentView === 'api-inspector' ? <RequestMessageDirectory /> : <ConversationDirectory />)}
         {!directoryOpen && (
           <div
             onClick={() => setDirectoryOpen(true)}

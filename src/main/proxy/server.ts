@@ -29,7 +29,6 @@ export interface ProxyServer {
 export async function startProxyServer(
   preferredPort: number,
   upstreamOverride?: string,
-  expectedKey?: string,
 ): Promise<ProxyServer> {
   const upstream = upstreamOverride ?? detectUpstream();
   const emitter = new EventEmitter();
@@ -38,26 +37,11 @@ export async function startProxyServer(
   // Parse all bodies as raw buffers so we can forward them byte-for-byte.
   app.use('/v1', express.raw({ type: '*/*', limit: '100mb' }));
 
-  // Shared-secret check for the capture endpoint. Only enforced when the
-  // caller actually generated a key (i.e. we wrote one to settings.json).
-  // passthrough routes (count_tokens, models) stay open — they don't write
-  // anything to the capture.
-  const captureAuth = expectedKey
-    ? (req: express.Request, res: express.Response, next: express.NextFunction): void => {
-        const got = req.headers['x-dialogueviz-key'];
-        if (typeof got !== 'string' || got !== expectedKey) {
-          res.status(403).json({ error: 'forbidden: missing or invalid x-dialogueviz-key' });
-          return;
-        }
-        next();
-      }
-    : (_req: express.Request, _res: express.Response, next: express.NextFunction): void => next();
-
-  app.post('/v1/messages', captureAuth, (req: express.Request, res: express.Response) => {
+  app.post('/v1/messages', (req: express.Request, res: express.Response) => {
     void handleMessages(req, res, upstream, emitter);
   });
 
-  app.post('/v1/responses', captureAuth, (req: express.Request, res: express.Response) => {
+  app.post('/v1/responses', (req: express.Request, res: express.Response) => {
     void handleResponses(req, res, upstream, emitter);
   });
 
@@ -134,7 +118,6 @@ const SKIPPED_REQUEST_HEADERS = new Set([
   'x-forwarded-port',
   'x-real-ip',
   'x-client-ip',
-  'x-dialogueviz-key',
 ]);
 
 function isProxyInternalHeader(name: string): boolean {

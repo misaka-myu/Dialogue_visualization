@@ -8,11 +8,129 @@ import { getMessageTokenInfo, formatTokenCount } from '../utils/tokens';
 import { setVirtuosoRef } from '../hooks/virtuosoRef';
 
 import { MarkdownViewer } from '../components/MarkdownViewer';
+import { HoverCopyBar } from '../components/HoverCopyBar';
+import { parseUserTextSegments, hasLocalCommandTags, LocalCommandSegment } from '../utils/commandParser';
+
+function LocalCommandBlock({ segment }: { segment: LocalCommandSegment }) {
+  const [open, setOpen] = useState(true);
+  const hasOutput = Boolean(segment.stdout || segment.stderr);
+
+  return (
+    <div style={{
+      margin: '6px 0',
+      background: 'rgba(100, 181, 246, 0.08)',
+      border: '1px solid rgba(100, 181, 246, 0.25)',
+      borderRadius: 4,
+      fontSize: 12,
+      overflow: 'hidden',
+    }}>
+      <div
+        onClick={() => hasOutput && setOpen(!open)}
+        style={{
+          padding: '4px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'rgba(100, 181, 246, 0.1)',
+          color: '#64b5f6',
+          fontWeight: 600,
+          fontSize: 11,
+          cursor: hasOutput ? 'pointer' : 'default',
+          userSelect: 'none',
+        }}
+      >
+        <span>⚡ 本地命令</span>
+        <code style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 5px', borderRadius: 3, color: '#e0e0e0', fontFamily: 'monospace' }}>
+          {segment.name}
+        </code>
+        {segment.message && <span style={{ opacity: 0.6, fontSize: 10 }}>({segment.message})</span>}
+        {segment.args && <span style={{ opacity: 0.6, fontSize: 10 }}>{segment.args}</span>}
+        {hasOutput && (
+          <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: 10 }}>
+            {open ? '▼ 收起输出' : '▶ 展开输出'}
+          </span>
+        )}
+      </div>
+
+      {open && (segment.stdout || segment.stderr) && (
+        <div style={{ padding: '6px 8px', borderTop: '1px solid rgba(100, 181, 246, 0.15)', background: 'rgba(0, 0, 0, 0.2)' }}>
+          {segment.stdout && (
+            <pre style={{ margin: 0, fontSize: 11, opacity: 0.85, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
+              {segment.stdout}
+            </pre>
+          )}
+          {segment.stderr && (
+            <pre style={{ margin: '4px 0 0', fontSize: 11, color: '#e57373', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
+              {segment.stderr}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SystemReminderBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{
+      margin: '6px 0',
+      background: 'rgba(255, 171, 145, 0.08)',
+      border: '1px solid rgba(255, 171, 145, 0.25)',
+      borderRadius: 4,
+      fontSize: 12,
+      overflow: 'hidden',
+    }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{
+          padding: '4px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'rgba(255, 171, 145, 0.1)',
+          color: '#ffab91',
+          fontWeight: 600,
+          fontSize: 11,
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        <span>📌 系统提醒 (System Reminder)</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: 10 }}>
+          {open ? '▼ 收起内容' : '▶ 展开内容'}
+        </span>
+      </div>
+      {open && (
+        <div style={{ padding: '6px 8px', borderTop: '1px solid rgba(255, 171, 145, 0.15)', background: 'rgba(0, 0, 0, 0.2)' }}>
+          <MarkdownViewer content={text} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Block({ block, lang }: { block: ContentBlock; lang?: string }) {
   switch (block.type) {
-    case 'text':
+    case 'text': {
+      if (hasLocalCommandTags(block.text)) {
+        const segments = parseUserTextSegments(block.text);
+        return (
+          <>
+            {segments.map((seg, idx) => {
+              if (seg.type === 'local_command') {
+                return <LocalCommandBlock key={idx} segment={seg} />;
+              }
+              if (seg.type === 'system_reminder') {
+                return <SystemReminderBlock key={idx} text={seg.text} />;
+              }
+              return <MarkdownViewer key={idx} content={seg.text} />;
+            })}
+          </>
+        );
+      }
       return <MarkdownViewer content={block.text} />;
+    }
     case 'tool_use':
       return (
         <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
@@ -88,8 +206,10 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
   const tok = getMessageTokenInfo({ role: role as import('../../main/model/types').Role, content: blocks, meta });
   const tokLabel = `${formatTokenCount(tok.count)} tok ${tok.real ? '✓' : '≈'}`;
   const ts = meta?.timestamp ? new Date(meta.timestamp).toLocaleString() : '';
+  const msgObj = { role: role as import('../../main/model/types').Role, content: blocks, meta };
+
   return (
-    <div style={{ background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
+    <div className="message-container" style={{ position: 'relative', background: c.bg, padding: '6px 10px', marginBottom: 6, borderRadius: 6, borderLeft: meta?.isSidechain ? '3px solid #ff8a65' : 'none' }}>
       <div
         onClick={() => setOpen(!open)}
         style={{ fontSize: 10, fontWeight: 600, opacity: 0.7, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
@@ -101,6 +221,9 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
         {meta?.isSidechain && <span style={{ color: '#ff8a65' }}>↳ 侧链</span>}
         {ts && <span style={{ opacity: 0.5 }}>{ts}</span>}
         {meta?.gitBranch && <span style={{ opacity: 0.5 }}>🌿 {meta.gitBranch}</span>}
+        <div style={{ marginLeft: 'auto' }} onClick={(e) => e.stopPropagation()}>
+          <HoverCopyBar message={msgObj} />
+        </div>
       </div>
       {open && blocks.map((b, i) => {
         const lang = b.type === 'tool_result' ? toolUseLangs?.get(b.toolUseId) : undefined;
