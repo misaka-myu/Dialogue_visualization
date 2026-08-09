@@ -10,6 +10,7 @@ import { RequestMessageDirectory } from './components/RequestMessageDirectory';
 import { useStore } from './store';
 
 import { ApiInspectorView } from './components/ApiInspectorView';
+import { TokenChartView } from './views/TokenChartView';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null as string | null };
@@ -84,6 +85,8 @@ export function App() {
                   <RawLogView />
                 ) : currentView === 'api-inspector' ? (
                   <ApiInspectorView />
+                ) : currentView === 'token-chart' ? (
+                  <TokenChartView />
                 ) : (
                   <ChatFlowView />
                 )}
@@ -91,7 +94,7 @@ export function App() {
             )}
           </div>
         </div>
-        {directoryOpen && (currentView === 'api-inspector' ? <RequestMessageDirectory /> : <ConversationDirectory />)}
+        {directoryOpen && currentView !== 'token-chart' && (currentView === 'api-inspector' ? <RequestMessageDirectory /> : <ConversationDirectory />)}
         {!directoryOpen && (
           <div
             onClick={() => setDirectoryOpen(true)}
