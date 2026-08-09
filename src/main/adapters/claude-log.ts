@@ -259,7 +259,7 @@ export function loadClaudeSession(path: string): Session {
     }
   }
 
-  if (badLineCount > 5) {
+  if (badLineCount >= 5) {
     console.warn('[claude-log] ' + badLineCount + ' total unparseable lines in ' + path + ';');
   }
   const meta = parseSessionMeta(path);

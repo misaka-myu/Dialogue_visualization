@@ -42,7 +42,14 @@ export function accumulateOpenaiResponsesSse(
   // (or send only output_index). Map output_index -> call_id from
   // output_item.added so we can still recover the right slot. Falls back to a
   // per-stream synthetic key (a counter) so we never silently drop the args.
-  const outputIndexToCallId = new Map<number, string>();
+  // P1-1: a value array, not a single value, so two function_calls that
+  // share an output_index (provider bug or future API change) do not
+  // overwrite each other. We attach deltas to the FIRST-registered
+  // call, which is the simplest deterministic policy. Subsequent calls
+  // sharing the same output_index are still tracked in the index so
+  // their own delta / done events still route correctly when they
+  // carry their own call_id (or a unique output_index).
+  const outputIndexToCallIds = new Map<number, string[]>();
   let fallbackCounter = 0;
 
   for (const evt of events) {
@@ -75,8 +82,10 @@ export function accumulateOpenaiResponsesSse(
             name: item.name ?? '',
             args: '',
           });
-          if (typeof item.output_index === 'number' && !outputIndexToCallId.has(item.output_index)) {
-            outputIndexToCallId.set(item.output_index, key);
+          if (typeof item.output_index === 'number') {
+            const list = outputIndexToCallIds.get(item.output_index) ?? [];
+            if (!list.includes(key)) list.push(key);
+            outputIndexToCallIds.set(item.output_index, list);
           }
         } else if (typeof item.output_index === 'number') {
           // C-2: provider gave us an output_index but no call_id. Use a
@@ -88,7 +97,11 @@ export function accumulateOpenaiResponsesSse(
             name: item.name ?? '',
             args: '',
           });
-          outputIndexToCallId.set(item.output_index, synth);
+          if (typeof item.output_index === 'number') {
+            const list = outputIndexToCallIds.get(item.output_index) ?? [];
+            if (!list.includes(synth)) list.push(synth);
+            outputIndexToCallIds.set(item.output_index, list);
+          }
         } else {
           console.warn('[sse] function_call without call_id/item.id/output_index, skipping');
         }
@@ -142,7 +155,10 @@ export function accumulateOpenaiResponsesSse(
       const itemId = evt.item?.call_id ?? evt.item?.id;
       const outIdx = typeof evt.item?.output_index === 'number' ? evt.item.output_index
         : typeof evt.output_index === 'number' ? evt.output_index : null;
-      const mapped = outIdx !== null ? outputIndexToCallId.get(outIdx) : null;
+      // P1-1: pick the first-registered call for this output_index so
+      // concurrent calls that share an output_index do not cross-pollute.
+      const mappedList = outIdx !== null ? outputIndexToCallIds.get(outIdx) : null;
+      const mapped = mappedList && mappedList.length > 0 ? mappedList[0] : null;
       const fc = (itemId && functionCallArgs.get(itemId))
         ?? (mapped && functionCallArgs.get(mapped))
         ?? null;
@@ -158,7 +174,10 @@ export function accumulateOpenaiResponsesSse(
       const itemId = evt.item?.call_id ?? evt.item?.id;
       const outIdx = typeof evt.item?.output_index === 'number' ? evt.item.output_index
         : typeof evt.output_index === 'number' ? evt.output_index : null;
-      const mapped = outIdx !== null ? outputIndexToCallId.get(outIdx) : null;
+      // P1-1: pick the first-registered call for this output_index so
+      // concurrent calls that share an output_index do not cross-pollute.
+      const mappedList = outIdx !== null ? outputIndexToCallIds.get(outIdx) : null;
+      const mapped = mappedList && mappedList.length > 0 ? mappedList[0] : null;
       const fc = (itemId && functionCallArgs.get(itemId))
         ?? (mapped && functionCallArgs.get(mapped))
         ?? null;

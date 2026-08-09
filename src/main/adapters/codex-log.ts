@@ -182,6 +182,7 @@ export function loadCodexSession(path: string): Session {
     let obj: CodexLine;
     // B-4: rate-limit warnings to avoid spamming the console on a corrupt
     // codex rollout. Cap per-line warnings at 5, then emit one summary.
+    // Include the line number so the user can jump to the corrupt row.
     try { obj = JSON.parse(line); } catch (err) {
       badLineCount++;
       if (badLineCount <= 5) {
@@ -378,7 +379,7 @@ export function loadCodexSession(path: string): Session {
 
   // B-4: emit a one-line summary when corruption exceeds the per-line
   // threshold so the user knows the file is bad without flooding the console.
-  if (badLineCount > 5) {
+  if (badLineCount >= 5) {
     console.warn('[codex-log] ' + badLineCount + ' total unparseable lines in ' + path + ';');
   }
 
