@@ -41,10 +41,16 @@ function Message({ role, blocks, meta, toolUseLangs }: { role: string; blocks: C
           <HoverCopyBar message={msgObj} />
         </div>
       </div>
-      {open && blocks.map((b, i) => {
-        const lang = b.type === 'tool_result' ? toolUseLangs?.get(b.toolUseId) : undefined;
-        return <ContentBlockView key={i} block={b} lang={lang} variant="default" />;
-      })}
+      {open && (
+        // BUG-5 fix: stop click propagation so toggling a tool_use header
+        // inside the message body does NOT collapse the whole message.
+        <div onClick={(e) => e.stopPropagation()}>
+          {blocks.map((b, i) => {
+            const lang = b.type === 'tool_result' ? toolUseLangs?.get(b.toolUseId) : undefined;
+            return <ContentBlockView key={i} block={b} lang={lang} variant="default" />;
+          })}
+        </div>
+      )}
     </div>
   );
 }

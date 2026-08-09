@@ -126,9 +126,16 @@ export function backupIfNeeded(target: GuardTarget, paths?: Paths): boolean {
 /** Inverse of backupIfNeeded. Restore the backup over the config,
  *  then drop the marker. Safe to call when the backup is missing
  *  (just clears the marker) or when the marker is missing
- *  (nothing to clean up). */
+ *  (nothing to clean up).
+ *  A-3 fix: when a marker is present but the backup is gone, the user
+ *  is still left with a polluted config and no way to recover. We now
+ *  surface that as a console warning so the failure mode is visible
+ *  instead of silently dropped by safeCopy catching its own errors. */
 export function restoreOnStop(target: GuardTarget, paths?: Paths): boolean {
   const p = getPaths(target, paths);
+  if (existsSync(p.marker) && !existsSync(p.backup)) {
+    console.warn("[configGuard] marker present but backup is missing for " + target + "; user " + target + " config may be left pointing at the dead proxy. Manual fix: delete " + p.marker + " and re-edit " + p.config + ".");
+  }
   const restored = safeCopy(p.backup, p.config);
   safeDelete(p.backup);
   safeDelete(p.marker);

@@ -27,6 +27,32 @@ export function useResizable({
   const onWidthChangeRef = useRef(onWidthChange);
   useEffect(() => { onWidthChangeRef.current = onWidthChange; }, [onWidthChange]);
 
+  // BUG-7 fix: keep a ref to the current drag handlers so the cleanup
+  // function below can detach them if the component unmounts mid-drag
+  // (e.g. user navigates while still holding the mouse down).
+  // Otherwise the listeners leak on `document` and any subsequent
+  // mousemove would call setState on an unmounted component.
+  const activeDragRef = useRef<{
+    onMove: (ev: MouseEvent) => void;
+    onUp: () => void;
+    prevBodyCursor: string;
+    prevBodyUserSelect: string;
+  } | null>(null);
+
+  // On unmount, clean up any in-flight drag.
+  useEffect(() => {
+    return () => {
+      const drag = activeDragRef.current;
+      if (drag) {
+        document.removeEventListener('mousemove', drag.onMove);
+        document.removeEventListener('mouseup', drag.onUp);
+        document.body.style.cursor = drag.prevBodyCursor;
+        document.body.style.userSelect = drag.prevBodyUserSelect;
+        activeDragRef.current = null;
+      }
+    };
+  }, []);
+
   const startResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -48,10 +74,12 @@ export function useResizable({
         document.removeEventListener('mouseup', onUp);
         document.body.style.cursor = prevBodyCursor;
         document.body.style.userSelect = prevBodyUserSelect;
+        activeDragRef.current = null;
         try { localStorage.setItem(storageKey, String(getWidth())); } catch { /* ignore */ }
       };
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+      activeDragRef.current = { onMove, onUp, prevBodyCursor, prevBodyUserSelect };
     },
     [side, minWidth, maxWidth, storageKey, getWidth],
   );

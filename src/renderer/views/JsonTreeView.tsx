@@ -210,7 +210,12 @@ export function JsonTreeView() {
           data={rows}
           itemContent={(_i, row) => {
             if (row.isOverflow) {
-              const parentPath = row.path.replace('.__overflow__', '');
+              // BUG-6: anchor the replace to the END of the path so we never
+              // accidentally strip a '.__overflow__' segment that happens to
+              // appear earlier in the key chain (defensive; current code
+              // shouldn't construct such paths, but the regex makes the
+              // intent explicit and resilient if that ever changes).
+              const parentPath = row.path.replace(/.__overflow__$/, '');
               return (
                 <button
                   onClick={() => setShowAllPaths(new Set(showAllPaths).add(parentPath))}
