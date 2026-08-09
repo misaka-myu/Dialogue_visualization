@@ -125,4 +125,67 @@ describe('buildRoundTokenSeries', () => {
     expect(series[0].inputTokens + series[0].outputTokens).toBe(2); // q1 (1 tok) + a1 (1 tok)
     expect(series[1].inputTokens + series[1].outputTokens).toBe(2); // q2 + a2
   });
+
+  it('estimates image blocks at 1000 tokens each (vision session sanity)', () => {
+    // extractMessageText returns '' for image blocks, so without the
+    // image estimate the round would count as 0 tokens. ~1000/image
+    // matches Anthropic's published per-image token equivalents.
+    const conversation: Message[] = [
+      { role: 'user', content: [
+        { type: 'text', text: 'what is this' },
+        { type: 'image', source: { type: 'base64', mediaType: 'image/png' } },
+        { type: 'image', source: { type: 'base64', mediaType: 'image/png' } },
+      ] },
+      { role: 'assistant', content: [{ type: 'text', text: 'cat' }] },
+    ];
+    const series = buildRoundTokenSeries(makeSession([], conversation));
+    expect(series).toHaveLength(1);
+    // "what is this" (12 chars / 4 = 3) + 2 images * 1000 = 2003 input.
+    expect(series[0].inputTokens).toBe(2003);
+    expect(series[0].source).toBe('estimate');
+  });
+
+  it('preserves real cache_read > input split (long-session shape)', () => {
+    // On long sessions Anthropic's prompt cache hits can exceed new
+    // input tokens. buildRoundTokenSeries should sum them faithfully
+    // and not let cache_read zero out the input total.
+    const conversation: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'q' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+    ];
+    const requests: ApiRequest[] = [
+      {
+        id: 'r1', timestamp: 1, model: 'm', system: [], messageCount: 2,
+        params: { maxTokens: 0 },
+        response: { content: [], stopReason: '', usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 9999, cacheCreationTokens: 0 } },
+      },
+    ];
+    const series = buildRoundTokenSeries(makeSession(requests, conversation));
+    expect(series).toHaveLength(1);
+    expect(series[0].cacheReadTokens).toBe(9999);
+    expect(series[0].inputTokens).toBe(100);
+    expect(series[0].source).toBe('real');
+  });
+
+  it('falls back to estimate when only some requests in a round have usage', () => {
+    // Two requests, only the first has real usage. The second is
+    // dropped (messageCount too high for round 0, so it doesn't
+    // count). End state: source is 'real' (because at least one
+    // request in the round had a usage block).
+    const conversation: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'q' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+    ];
+    const requests: ApiRequest[] = [
+      {
+        id: 'r1', timestamp: 1, model: 'm', system: [], messageCount: 2,
+        params: { maxTokens: 0 },
+        response: { content: [], stopReason: '', usage: { inputTokens: 5, outputTokens: 3, cacheReadTokens: 0, cacheCreationTokens: 0 } },
+      },
+    ];
+    const series = buildRoundTokenSeries(makeSession(requests, conversation));
+    expect(series).toHaveLength(1);
+    expect(series[0].source).toBe('real');
+    expect(series[0].inputTokens).toBe(5);
+  });
 });

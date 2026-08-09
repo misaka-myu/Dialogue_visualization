@@ -7,7 +7,7 @@
 // numbers; a thin marker below the bar shows whether the data is real
 // (API-reported) or estimated (chars/4 fallback).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from '../store';
 import { buildRoundTokenSeries, RoundTokenData } from '../utils/roundToken';
 import { formatTokenCount } from '../utils/tokens';
@@ -33,6 +33,11 @@ export function TokenChartView() {
   const session = useStore((s) => s.currentSession);
   const series = useMemo(() => (session ? buildRoundTokenSeries(session) : []), [session]);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  // Reset hover when the session changes so we don't carry a stale
+  // index over to a different number of bars.
+  useEffect(() => {
+    setHoverIdx(null);
+  }, [session?.id]);
 
   if (!session) {
     return (
@@ -50,16 +55,52 @@ export function TokenChartView() {
     );
   }
 
+  // Aggregate into buckets when the session has many rounds. Without
+  // this, CHART_WIDTH is fixed at 880 and ~130+ rounds make each bar
+  // clip to 4px; ~2000+ rounds would render past the SVG bounds with
+  // the y-axis labels still assuming a 880px canvas. Bucketing keeps
+  // the chart legible at any session size. The threshold / bucket
+  // size are picked so the chart stays readable on a typical window
+  // width: 80 bars at ~10px each fits comfortably.
+  const BUCKET_THRESHOLD = 80;
+  const display: { rounds: RoundTokenData[]; isBucket: boolean; firstRound: number; lastRound: number }[] = [];
+  if (series.length > BUCKET_THRESHOLD) {
+    // Aim for ~BUCKET_THRESHOLD bars; round bucket size up.
+    const bucketSize = Math.ceil(series.length / BUCKET_THRESHOLD);
+    for (let i = 0; i < series.length; i += bucketSize) {
+      const slice = series.slice(i, i + bucketSize);
+      display.push({
+        rounds: slice,
+        isBucket: true,
+        firstRound: slice[0].roundNumber,
+        lastRound: slice[slice.length - 1].roundNumber,
+      });
+    }
+  } else {
+    for (const r of series) {
+      display.push({ rounds: [r], isBucket: false, firstRound: r.roundNumber, lastRound: r.roundNumber });
+    }
+  }
+
   // Pick a "nice" max value that includes a little headroom.
   const maxStack = Math.max(
     1,
-    ...series.map((r) => r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens),
+    ...display.map((d) =>
+      d.rounds.reduce(
+        (acc, r) => acc + r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens,
+        0,
+      ),
+    ),
   );
   const niceMax = niceCeil(maxStack * 1.1);
 
-  const innerW = CHART_WIDTH - PADDING_LEFT - PADDING_RIGHT;
+  // Width scales with the number of bars so the SVG never overflows.
+  const BAR_TARGET_WIDTH = 10;
+  const barW = Math.max(4, BAR_TARGET_WIDTH);
+  const totalW = PADDING_LEFT + display.length * (barW + BAR_GAP) + PADDING_RIGHT - BAR_GAP;
+  const chartW = Math.max(CHART_WIDTH, totalW);
+  const innerW = chartW - PADDING_LEFT - PADDING_RIGHT;
   const innerH = CHART_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
-  const barW = Math.max(4, (innerW - BAR_GAP * (series.length - 1)) / series.length);
 
   return (
     <div style={{ padding: '12px 16px', overflow: 'auto' }}>
@@ -67,11 +108,11 @@ export function TokenChartView() {
         <span style={{ fontWeight: 600, fontSize: 14 }}>📊 Token 用量趋势（按 round）</span>
         <Legend />
         <span style={{ marginLeft: 'auto', opacity: 0.55 }}>
-          {series.length} rounds · max {formatTokenCount(niceMax)} tok
+          {series.length} rounds{series.length > BUCKET_THRESHOLD ? ` · ${display.length} bars (batched)` : ''} · max {formatTokenCount(niceMax)} tok
         </span>
       </div>
       <svg
-        width={CHART_WIDTH}
+        width={chartW}
         height={CHART_HEIGHT}
         style={{ background: 'rgba(0,0,0,0.2)', borderRadius: 4, display: 'block', maxWidth: '100%' }}
       >
@@ -80,7 +121,7 @@ export function TokenChartView() {
           const y = PADDING_TOP + innerH - (tick / niceMax) * innerH;
           return (
             <g key={tick}>
-              <line x1={PADDING_LEFT} x2={CHART_WIDTH - PADDING_RIGHT} y1={y} y2={y} stroke={COLORS.axis} strokeDasharray="2 3" />
+              <line x1={PADDING_LEFT} x2={chartW - PADDING_RIGHT} y1={y} y2={y} stroke={COLORS.axis} strokeDasharray="2 3" />
               <text x={PADDING_LEFT - 6} y={y + 3} fontSize={10} fill={COLORS.label} textAnchor="end">
                 {formatTokenCount(tick)}
               </text>
@@ -88,24 +129,28 @@ export function TokenChartView() {
           );
         })}
         {/* Bars */}
-        {series.map((r, i) => {
+        {display.map((d, i) => {
           const x = PADDING_LEFT + i * (barW + BAR_GAP);
-          const total = r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheCreationTokens;
+          // Aggregate across the bucket.
+          const agg = d.rounds.reduce(
+            (acc, r) => ({
+              cacheCreationTokens: acc.cacheCreationTokens + r.cacheCreationTokens,
+              inputTokens: acc.inputTokens + r.inputTokens,
+              outputTokens: acc.outputTokens + r.outputTokens,
+              cacheReadTokens: acc.cacheReadTokens + r.cacheReadTokens,
+            }),
+            { cacheCreationTokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0 },
+          );
+          const total = agg.cacheCreationTokens + agg.inputTokens + agg.outputTokens + agg.cacheReadTokens;
           const h = (total / niceMax) * innerH;
           let yCursor = PADDING_TOP + innerH;
-          const segs: Array<[string, number, number]> = [
-            ['cache_creation', r.cacheCreationTokens, yCursor],
-            ['input', r.inputTokens, yCursor],
-            ['output', r.outputTokens, yCursor],
-            ['cache_read', r.cacheReadTokens, yCursor],
-          ];
           // Walk bottom-up.
           const rendered: React.ReactNode[] = [];
           for (const [key, value] of [
-            ['cache_creation', r.cacheCreationTokens],
-            ['input', r.inputTokens],
-            ['output', r.outputTokens],
-            ['cache_read', r.cacheReadTokens],
+            ['cache_creation', agg.cacheCreationTokens],
+            ['input', agg.inputTokens],
+            ['output', agg.outputTokens],
+            ['cache_read', agg.cacheReadTokens],
           ] as const) {
             if (value <= 0) continue;
             const segH = (value / niceMax) * innerH;
@@ -122,10 +167,12 @@ export function TokenChartView() {
               />,
             );
           }
+          // The bucket is "real" only if every round in it is real.
+          const source = d.rounds.every((r) => r.source === 'real') ? 'real' : 'estimate';
           return (
-            <g key={r.roundNumber} onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}>
+            <g key={i} onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}>
               {rendered}
-              {/* X-axis label: round number */}
+              {/* X-axis label: round number (or "R{first}-{last}" for a bucket) */}
               <text
                 x={x + barW / 2}
                 y={CHART_HEIGHT - PADDING_BOTTOM + 14}
@@ -133,7 +180,9 @@ export function TokenChartView() {
                 fill={COLORS.label}
                 textAnchor="middle"
               >
-                R{r.roundNumber}
+                {d.isBucket
+                  ? `R${d.firstRound}-${d.lastRound}`
+                  : `R${d.firstRound}`}
               </text>
               {/* Source marker (real vs estimated) — short bar below the label */}
               <line
@@ -141,10 +190,10 @@ export function TokenChartView() {
                 x2={x + barW / 2 + 6}
                 y1={CHART_HEIGHT - PADDING_BOTTOM + 24}
                 y2={CHART_HEIGHT - PADDING_BOTTOM + 24}
-                stroke={r.source === 'real' ? COLORS.output : COLORS.estimate}
+                stroke={source === 'real' ? COLORS.output : COLORS.estimate}
                 strokeWidth={2}
               />
-              {r.model && (
+              {d.rounds.some((r) => r.model) && (
                 <text
                   x={x + barW / 2}
                   y={CHART_HEIGHT - PADDING_BOTTOM + 36}
@@ -153,15 +202,28 @@ export function TokenChartView() {
                   textAnchor="middle"
                   opacity={0.6}
                 >
-                  {r.model}
+                  {d.rounds.find((r) => r.model)?.model}
                 </text>
               )}
             </g>
           );
         })}
         {/* Tooltip */}
-        {hoverIdx !== null && series[hoverIdx] && (
-          <Tooltip data={series[hoverIdx]} x={PADDING_LEFT + hoverIdx * (barW + BAR_GAP) + barW / 2} />
+        {hoverIdx !== null && display[hoverIdx] && (
+          <Tooltip
+            data={{
+              roundNumber: display[hoverIdx].firstRound,
+              userIndex: 0,
+              source: display[hoverIdx].rounds.every((r) => r.source === 'real') ? 'real' : 'estimate',
+              inputTokens: display[hoverIdx].rounds.reduce((a, r) => a + r.inputTokens, 0),
+              outputTokens: display[hoverIdx].rounds.reduce((a, r) => a + r.outputTokens, 0),
+              cacheReadTokens: display[hoverIdx].rounds.reduce((a, r) => a + r.cacheReadTokens, 0),
+              cacheCreationTokens: display[hoverIdx].rounds.reduce((a, r) => a + r.cacheCreationTokens, 0),
+            }}
+            x={PADDING_LEFT + hoverIdx * (barW + BAR_GAP) + barW / 2}
+            bucketRange={display[hoverIdx].isBucket ? [display[hoverIdx].firstRound, display[hoverIdx].lastRound] : null}
+            chartW={chartW}
+          />
         )}
       </svg>
     </div>
@@ -169,25 +231,44 @@ export function TokenChartView() {
 }
 
 function Legend() {
-  const items: Array<[string, string]> = [
-    ['cache_creation', COLORS.cache_creation],
-    ['input', COLORS.input],
-    ['output', COLORS.output],
-    ['cache_read', COLORS.cache_read],
-  ];
   return (
     <span style={{ display: 'inline-flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-      {items.map(([label, color]) => (
-        <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ width: 10, height: 10, background: color, borderRadius: 2, display: 'inline-block' }} />
-          <span style={{ opacity: 0.7 }}>{label}</span>
-        </span>
-      ))}
+      <Swatch color={COLORS.cache_creation} label="cache_creation" />
+      <Swatch color={COLORS.input} label="input" />
+      <Swatch color={COLORS.output} label="output" />
+      <Swatch color={COLORS.cache_read} label="cache_read" />
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, opacity: 0.7 }}>
+        <span style={{ width: 12, height: 0, borderTop: `2px solid ${COLORS.output}`, display: 'inline-block' }} />
+        <span>✓ 实测</span>
+      </span>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, opacity: 0.7 }}>
+        <span style={{ width: 12, height: 0, borderTop: `2px solid ${COLORS.estimate}`, display: 'inline-block' }} />
+        <span>≈ 估算</span>
+      </span>
     </span>
   );
 }
 
-function Tooltip({ data, x }: { data: RoundTokenData; x: number }) {
+function Swatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+      <span style={{ width: 10, height: 10, background: color, borderRadius: 2, display: 'inline-block' }} />
+      <span style={{ opacity: 0.7 }}>{label}</span>
+    </span>
+  );
+}
+
+function Tooltip({
+  data,
+  x,
+  bucketRange,
+  chartW,
+}: {
+  data: RoundTokenData;
+  x: number;
+  bucketRange: [number, number] | null;
+  chartW: number;
+}) {
   const total = data.inputTokens + data.outputTokens + data.cacheReadTokens + data.cacheCreationTokens;
   const lines: Array<['cache_creation' | 'input' | 'output' | 'cache_read', number]> = [
     ['cache_creation', data.cacheCreationTokens],
@@ -195,14 +276,14 @@ function Tooltip({ data, x }: { data: RoundTokenData; x: number }) {
     ['output', data.outputTokens],
     ['cache_read', data.cacheReadTokens],
   ];
-  // Clamp x so the box doesn't run off the right edge.
+  // Clamp x so the box doesn't run off the right edge of the parent svg.
   const boxW = 180;
-  const boxX = Math.min(Math.max(boxW / 2, x), 880 - boxW / 2) - boxW / 2;
+  const boxX = Math.min(Math.max(boxW / 2, x), chartW - boxW / 2) - boxW / 2;
   return (
     <g>
       <rect x={boxX} y={PADDING_TOP} width={boxW} height={92} rx={4} fill="rgba(30,30,30,0.96)" stroke="rgba(255,255,255,0.15)" />
       <text x={boxX + 8} y={PADDING_TOP + 16} fontSize={11} fill="white" fontWeight={600}>
-        R{data.roundNumber} · {data.source === 'real' ? '✓' : '≈'} {formatTokenCount(total)} tok
+        {bucketRange ? `R${bucketRange[0]}-${bucketRange[1]}` : `R${data.roundNumber}`} · {data.source === 'real' ? '✓' : '≈'} {formatTokenCount(total)} tok
       </text>
       {lines.map(([k, v], i) => (
         <text key={k} x={boxX + 8} y={PADDING_TOP + 32 + i * 14} fontSize={10} fill={COLORS[k]}>

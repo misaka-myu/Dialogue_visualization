@@ -94,7 +94,7 @@ export function App() {
             )}
           </div>
         </div>
-        {directoryOpen && (currentView === 'api-inspector' ? <RequestMessageDirectory /> : <ConversationDirectory />)}
+        {directoryOpen && currentView !== 'token-chart' && (currentView === 'api-inspector' ? <RequestMessageDirectory /> : <ConversationDirectory />)}
         {!directoryOpen && (
           <div
             onClick={() => setDirectoryOpen(true)}

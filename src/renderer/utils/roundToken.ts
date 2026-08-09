@@ -85,22 +85,33 @@ export function buildRoundTokenSeries(session: Session): RoundTokenData[] {
     // Fallback: estimate from message character counts. We include all
     // messages from the user up to the start of the next round (or the
     // end of the conversation) so the bar roughly matches what the
-    // real usage would have been.
-    const next = rounds.find((r) => r.roundNumber === round.roundNumber + 1);
+    // real usage would have been. We reuse the already-known next round
+    // (idx+1) rather than re-finding by roundNumber — O(n) instead of
+    // O(n²) for a session with thousands of rounds.
+    const next = rounds[idx + 1];
     const endIdx = next ? next.userIndex : session.conversation.length;
     let inputEstimate = 0;
     let outputEstimate = 0;
+    let imageCount = 0;
     for (let i = roundUserIdx; i < endIdx; i++) {
       const m = session.conversation[i];
       const info = getMessageTokenInfo(m);
       if (m.role === 'assistant') outputEstimate += info.count;
       else inputEstimate += info.count;
+      // Image blocks aren't returned by extractMessageText (which would
+      // have us under-count vision sessions by thousands of tokens per
+      // image). Add a fixed ~1000-token estimate per image — close to
+      // Anthropic's published image pricing token equivalents.
+      for (const b of m.content) {
+        if (b.type === 'image') imageCount++;
+      }
     }
+    const imageEstimate = imageCount * 1000;
     return {
       roundNumber: round.roundNumber,
       userIndex: round.userIndex,
       source: 'estimate',
-      inputTokens: inputEstimate,
+      inputTokens: inputEstimate + imageEstimate,
       outputTokens: outputEstimate,
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
