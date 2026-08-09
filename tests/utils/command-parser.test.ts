@@ -154,4 +154,22 @@ plain text`;
     expect(result[1].type).toBe('ide_context');
     expect(result[2]).toEqual({ type: 'text', text: 'plain text' });
   });
+
+  it('does not infinite-loop on malformed <command-name> without closing tag', () => {
+    // The terminated-tag regex is lazy + closes on </command-name>; with
+    // no closing tag it'd otherwise walk to end-of-string and swallow
+    // everything. Verify we produce at least one segment and never
+    // hang the parser.
+    const text = '<command-name>unclosed\nfollow up question';
+    const result = parseUserTextSegments(text);
+    expect(result.length).toBeGreaterThan(0);
+    // The content must be reachable as either a local_command segment
+    // or plain text — never silently dropped.
+    const flat = result.map((s) => {
+      if (s.type === 'text') return s.text;
+      if (s.type === 'local_command') return `${s.name ?? ''} ${s.stdout ?? ''}`;
+      return '';
+    }).join('\n');
+    expect(flat).toMatch(/follow up question/);
+  });
 });
