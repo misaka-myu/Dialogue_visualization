@@ -7,6 +7,7 @@ import { useStore } from '../store';
 import { Message } from '../../main/model/types';
 import { useResizable } from '../hooks/useResizable';
 import { formatTokenCount } from '../utils/tokens';
+import { findCurrentReq } from '../utils/requestSelection';
 
 function getMessagePreview(msg: Message): string {
   for (const block of msg.content) {
@@ -45,10 +46,10 @@ export function RequestMessageDirectory() {
   });
 
   const requests = session?.requests ?? [];
-  const currentReq = useMemo(() => {
-    if (!requests.length) return null;
-    return requests.find((r) => r.id === selectedRequestId) ?? requests[0];
-  }, [requests, selectedRequestId]);
+  const currentReq = useMemo(
+    () => findCurrentReq(requests, selectedRequestId),
+    [requests, selectedRequestId],
+  );
 
   const sentMessages: Message[] = useMemo(() => {
     if (!currentReq || !session) return [];

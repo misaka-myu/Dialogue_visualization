@@ -7,6 +7,7 @@ import { MarkdownViewer } from './MarkdownViewer';
 import { HoverCopyBar } from './HoverCopyBar';
 import { parseUserTextSegments, hasLocalCommandTags, LocalCommandSegment } from '../utils/commandParser';
 import { formatTokenCount } from '../utils/tokens';
+import { findCurrentReq, findCurrentReqIndex } from '../utils/requestSelection';
 import '../styles/api-inspector.css';
 
 type TabType = 'overview' | 'system-tools' | 'sent-messages' | 'raw-json';
@@ -127,16 +128,15 @@ export function ApiInspectorView() {
   const requests = session?.requests ?? [];
 
   // Currently selected ApiRequest
-  const currentReq = useMemo(() => {
-    if (!requests.length) return null;
-    const found = requests.find((r, i) => (r.id && r.id === selectedRequestId) || `req-idx-${i}` === selectedRequestId);
-    return found ?? requests[0];
-  }, [requests, selectedRequestId]);
+  const currentReq = useMemo(
+    () => findCurrentReq(requests, selectedRequestId),
+    [requests, selectedRequestId],
+  );
 
-  const reqIndex = useMemo(() => {
-    if (!currentReq) return -1;
-    return requests.findIndex((r) => r === currentReq);
-  }, [requests, currentReq]);
+  const reqIndex = useMemo(
+    () => findCurrentReqIndex(requests, selectedRequestId),
+    [requests, selectedRequestId],
+  );
 
   // Derive full input messages sent for this request
   const sentMessages: Message[] = useMemo(() => {
