@@ -61,13 +61,11 @@ export function RequestMessageDirectory() {
   }, [currentReq, session]);
 
   const handleJumpToMessage = (index: number) => {
-    // Fire event to switch tab to 'sent-messages' and scroll to api-msg-${index}
-    const el = document.getElementById(`api-msg-${index}`);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } else {
-      window.dispatchEvent(new CustomEvent('api-inspector-jump-msg', { detail: { index } }));
-    }
+    // Always dispatch — ApiInspectorView owns the "switch tab + scroll"
+    // sequence. Trying to scrollIntoView directly here races with the
+    // sent-messages tab not being mounted yet (the target element won't
+    // exist when the directory's current tab is 'overview').
+    window.dispatchEvent(new CustomEvent('api-inspector-jump-msg', { detail: { index } }));
   };
 
   return (

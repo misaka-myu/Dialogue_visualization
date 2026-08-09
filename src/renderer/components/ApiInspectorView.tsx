@@ -26,6 +26,11 @@ export function ApiInspectorView() {
 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [copiedRaw, setCopiedRaw] = useState(false);
+  // Index of the message card the directory wants us to scroll to.
+  // Triggers a re-scroll when `activeTab` flips to 'sent-messages' (React
+  // // state instead of setTimeout — survives StrictMode double-render and
+  // // slow machines where 50ms wasn't enough).
+  const [pendingJump, setPendingJump] = useState<number | null>(null);
 
   const requests = session?.requests ?? [];
 
@@ -55,19 +60,29 @@ export function ApiInspectorView() {
     const handleJump = (e: Event) => {
       const customEvent = e as CustomEvent<{ index: number }>;
       const idx = customEvent.detail?.index;
-      if (typeof idx === 'number') {
-        setActiveTab('sent-messages');
-        setTimeout(() => {
-          const el = document.getElementById(`api-msg-${idx}`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }, 50);
-      }
+      if (typeof idx !== 'number') return;
+      // Always set the pending jump + flip to sent-messages. The effect
+      // below fires once the tab is actually active so the target DOM
+      // element exists when we scrollIntoView.
+      setPendingJump(idx);
+      setActiveTab('sent-messages');
     };
     window.addEventListener('api-inspector-jump-msg', handleJump);
     return () => window.removeEventListener('api-inspector-jump-msg', handleJump);
   }, []);
+
+  // Scroll the requested message card into view after the sent-messages
+  // tab has rendered. We watch `activeTab` as well so a jump that lands
+  // while the tab is already active still scrolls (pendingJump alone
+  // wouldn't change and the effect wouldn't re-fire).
+  useEffect(() => {
+    if (activeTab !== 'sent-messages' || pendingJump === null) return;
+    const el = document.getElementById(`api-msg-${pendingJump}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setPendingJump(null);
+  }, [activeTab, pendingJump]);
 
   if (!session || !requests.length) {
     return (
