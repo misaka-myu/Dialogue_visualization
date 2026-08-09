@@ -70,14 +70,132 @@ export function ContentBlockView({ block, lang, variant }: Props) {
 
 // ── Default variant (ChatFlowView) ────────────────────────────────────────────
 
+/** Format a tool input value for the k/v table. Strings longer than
+ *  the cap collapse into a truncated preview; objects/arrays fall
+ *  through to JSON.stringify for an indented look. Exported for tests. */
+export function formatToolValue(value: unknown, maxChars = 200): { preview: string; full: string; truncated: boolean } {
+  if (typeof value === 'string') {
+    if (value.length <= maxChars) {
+      return { preview: value, full: value, truncated: false };
+    }
+    return { preview: value.slice(0, maxChars) + '…', full: value, truncated: true };
+  }
+  if (value === null || value === undefined) {
+    return { preview: String(value), full: String(value), truncated: false };
+  }
+  const json = JSON.stringify(value, null, 2);
+  return { preview: json, full: json, truncated: false };
+}
+
+/** Known Claude Code / Codex tool names whose `command` / `file_path`
+ *  / `content` fields deserve a dedicated row styling (monospace +
+ *  syntax hint). Anything else falls back to the plain k/v table. */
+const TOOL_FIELD_PRESETS: Record<string, Record<string, 'command' | 'path' | 'code'>> = {
+  Write: { file_path: 'path', content: 'code' },
+  Read: { file_path: 'path' },
+  Edit: { file_path: 'path', new_string: 'code', old_string: 'code' },
+  MultiEdit: { file_path: 'path' },
+  Glob: { pattern: 'command' },
+  Grep: { pattern: 'command' },
+  Bash: { command: 'command', workdir: 'path' },
+  shell_command: { command: 'command', workdir: 'path' },
+  NotebookEdit: { notebook_path: 'path' },
+  WebFetch: { url: 'command' },
+  WebSearch: { query: 'command' },
+};
+
 function ToolUseDefault({ name, input }: { name: string; input: unknown }) {
+  const [open, setOpen] = useState(false);
+  const entries = input && typeof input === 'object'
+    ? Object.entries(input as Record<string, unknown>)
+    : [];
+  const presets = TOOL_FIELD_PRESETS[name] ?? {};
+  const totalChars = JSON.stringify(input ?? {})?.length ?? 0;
+
   return (
-    <div style={{ marginTop: 4, padding: '4px 8px', background: 'rgba(255,183,77,0.15)', borderRadius: 4, fontSize: 12 }}>
-      <span>🔧 <strong>tool_use: {name}</strong></span>
-      <pre style={{ margin: '4px 0 0', opacity: 0.7, fontSize: 11, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-        {JSON.stringify(input, null, 2)}
-      </pre>
+    <div style={{
+      marginTop: 4,
+      background: 'rgba(255,183,77,0.08)',
+      border: '1px solid rgba(255,183,77,0.3)',
+      borderRadius: 4,
+      fontSize: 12,
+      overflow: 'hidden',
+    }}>
+      <div
+        role="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        style={{
+          padding: '4px 8px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'rgba(255,183,77,0.12)',
+          color: '#ffb74d',
+          fontWeight: 600,
+          fontSize: 11,
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        <span>🔧 tool_use: {name}</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.7, fontSize: 10 }}>
+          {open ? '▼ 收起' : `▶ 展开 (${entries.length})`}
+        </span>
+      </div>
+      {open && (
+        <div style={{ padding: '6px 10px', borderTop: '1px solid rgba(255,183,77,0.2)', background: 'rgba(0,0,0,0.2)' }}>
+          {entries.length === 0 ? (
+            <pre style={{ margin: 0, fontSize: 11, opacity: 0.7, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
+              {totalChars > 0 ? JSON.stringify(input, null, 2) : '(empty input)'}
+            </pre>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <tbody>
+                {entries.map(([key, value]) => {
+                  const { preview, full, truncated } = formatToolValue(value);
+                  const preset = presets[key];
+                  const mono = preset !== undefined;
+                  return (
+                    <tr key={key}>
+                      <td style={{ verticalAlign: 'top', padding: '2px 8px 2px 0', color: '#ffb74d', fontFamily: mono ? 'monospace' : 'inherit', whiteSpace: 'nowrap' }}>
+                        {key}
+                      </td>
+                      <td style={{ verticalAlign: 'top', padding: '2px 0', fontFamily: mono ? 'monospace' : 'inherit', wordBreak: 'break-word' }}>
+                        <TruncatedValue preview={preview} full={full} truncated={truncated} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** Click-to-expand a long value. We use useState (not the native
+ *  <details> element) because <details> is a block element and renders
+ *  inconsistently inside <td> across browsers. */
+function TruncatedValue({ preview, full, truncated }: { preview: string; full: string; truncated: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!truncated) return <span style={{ opacity: 0.9 }}>{preview}</span>;
+  return (
+    <span>
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          background: 'transparent', border: 'none', color: 'inherit',
+          cursor: 'pointer', padding: 0, font: 'inherit',
+          opacity: 0.85, textAlign: 'left',
+        }}
+      >
+        {expanded ? full : preview}
+      </button>
+    </span>
   );
 }
 
