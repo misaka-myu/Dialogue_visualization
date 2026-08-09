@@ -27,11 +27,15 @@ export function findCurrentReq(requests: ApiRequest[], selectedId: string | null
 }
 
 /** Same matching rules as `findCurrentReq`, but returns the index in the
- *  requests array. Returns -1 when no match and no fallback is wanted. */
+ *  requests array. Returns 0 (matching `findCurrentReq` which falls back to
+ *  the first request) when no request matches. Returning -1 here used to
+ *  desync ApiInspectorView's left-rail highlight from the right-pane
+ *  content (BUG-4). */
 export function findCurrentReqIndex(requests: ApiRequest[], selectedId: string | null): number {
   if (!requests.length) return -1;
   if (selectedId === null) return 0;
-  return requests.findIndex(
+  const idx = requests.findIndex(
     (r, i) => r.id === selectedId || `req-idx-${i}` === selectedId,
   );
+  return idx === -1 ? 0 : idx;
 }

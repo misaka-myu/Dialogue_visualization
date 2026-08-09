@@ -12,10 +12,18 @@ import { useStore } from './store';
 import { ApiInspectorView } from './components/ApiInspectorView';
 import { TokenChartView } from './views/TokenChartView';
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { error: string | null }> {
   state = { error: null as string | null };
   componentDidCatch(err: Error) {
     this.setState({ error: err.message || String(err) });
+  }
+  // BUG-3 fix: when the view changes, reset any previously-caught
+  // error so the new view's failure (if any) is reported cleanly
+  // instead of being masked by the previous view's error.
+  componentDidUpdate(prevProps: { resetKey?: string }) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.error) {
+      this.setState({ error: null });
+    }
   }
   render() {
     if (this.state.error) {
@@ -78,7 +86,7 @@ export function App() {
             {!currentSession ? (
               <div style={{ padding: 24, opacity: 0.5 }}>从左侧选择一个会话开始</div>
             ) : (
-              <ErrorBoundary key={currentView}>
+              <ErrorBoundary resetKey={currentView}>
                 {currentView === 'json-tree' ? (
                   <JsonTreeView />
                 ) : currentView === 'raw-log' ? (

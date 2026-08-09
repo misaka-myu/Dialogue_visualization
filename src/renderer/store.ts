@@ -140,7 +140,10 @@ export const useStore = create<State>((set, get) => ({
       // No file path is associated with a programmatic session change
       // (e.g. starting a fresh capture); callers that DO open a specific
       // file should follow up by setting openSourcePath themselves.
-      openSourcePath: s ? get().openSourcePath : null,
+      // BUG-1 fix: proxy-live sessions have no on-disk source; clear the previous
+      // openSourcePath so the sidebar stops highlighting the old file and
+      // deleteLiveCapture doesn't mis-clear the live session.
+      openSourcePath: s && s.source !== 'proxy-live' ? get().openSourcePath : null,
       // Reset scroll-sync highlight so the directory doesn't briefly show a
       // stale index while the new session's rangeChanged fires.
       activeDirectoryIndex: null,

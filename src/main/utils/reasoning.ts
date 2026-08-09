@@ -12,32 +12,27 @@ export function extractReasoningText(input: unknown): string | null {
   }
 
   if (Array.isArray(input)) {
-    const texts = input
-      .map((b: any) => {
-        if (!b) return '';
-        if (typeof b === 'string') return b;
-        if (typeof b === 'object') {
-          return b.text ?? b.summary ?? b.reasoning ?? '';
-        }
-        return '';
-      })
-      .filter((t: string) => typeof t === 'string' && t.trim().length > 0);
-
+    // A-11 fix: recurse into nested arrays (some providers emit
+    // [summary, [reasoning_text_obj, ...]] shapes). Without this we
+    // would return [object Object] for the outer array element.
+    const texts: string[] = [];
+    for (const b of input) {
+      const t = extractReasoningText(b);
+      if (t) texts.push(t);
+    }
     return texts.length > 0 ? texts.join('\n') : null;
   }
 
   if (typeof input === 'object') {
     const obj = input as Record<string, any>;
-    if (obj.summary) {
-      const summaryText = extractReasoningText(obj.summary);
-      if (summaryText) return summaryText;
-    }
-    if (obj.content) {
-      const contentText = extractReasoningText(obj.content);
-      if (contentText) return contentText;
-    }
-    if (typeof obj.text === 'string' && obj.text.trim()) {
-      return obj.text.trim();
+    // Walk the typical reasoning-field chain so we accept Anthropic,
+    // OpenAI, and Codex response shapes without forcing callers to know
+    // which provider the data came from.
+    for (const key of [ 'summary', 'content', 'reasoning', 'text' ]) {
+      const v = obj[key];
+      if (v == null) continue;
+      const nested = extractReasoningText(v);
+      if (nested) return nested;
     }
   }
 

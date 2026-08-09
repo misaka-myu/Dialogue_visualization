@@ -109,7 +109,8 @@ function quickParseCodexMeta(path: string): CodexSessionMeta | null {
     const text = readFileSync(path, 'utf-8');
     const lines = text.split('\n').filter((l) => l.trim()).slice(0, 10);
     const isArchived = path.includes('archived_sessions');
-    for (const line of lines) {
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
       let obj: CodexLine;
       try { obj = JSON.parse(line); } catch { continue; }
       if (obj.type === 'session_meta') {
@@ -174,9 +175,21 @@ export function loadCodexSession(path: string): Session {
   // (Codex emits reasoning BEFORE the assistant response_item).
   let pendingReasoning: string | null = null;
 
-  for (const line of lines) {
+  // B-4: counter used to throttle JSON.parse-failure warnings.
+  let badLineCount = 0;
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
     let obj: CodexLine;
-    try { obj = JSON.parse(line); } catch { continue; }
+    // B-4: rate-limit warnings to avoid spamming the console on a corrupt
+    // codex rollout. Cap per-line warnings at 5, then emit one summary.
+    // Include the line number so the user can jump to the corrupt row.
+    try { obj = JSON.parse(line); } catch (err) {
+      badLineCount++;
+      if (badLineCount <= 5) {
+        console.warn('[codex-log] unparseable JSONL line at ' + (lineIdx + 1) + ' (file ' + path + '):', err);
+      }
+      continue;
+    }
     rawLines.push(obj);
 
     const ts = obj.timestamp ? Date.parse(obj.timestamp) : undefined;
@@ -362,6 +375,12 @@ export function loadCodexSession(path: string): Session {
       messageCount: 0,
       params: { maxTokens: 0 },
     });
+  }
+
+  // B-4: emit a one-line summary when corruption exceeds the per-line
+  // threshold so the user knows the file is bad without flooding the console.
+  if (badLineCount >= 5) {
+    console.warn('[codex-log] ' + badLineCount + ' total unparseable lines in ' + path + ';');
   }
 
   return {

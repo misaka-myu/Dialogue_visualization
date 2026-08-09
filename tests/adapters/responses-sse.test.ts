@@ -92,3 +92,68 @@ describe('accumulateOpenaiResponsesSse', () => {
     expect(result!.stopReason).toBe('completed');
   });
 });
+
+describe('accumulateOpenaiResponsesSse (C-2: output_index fallback)', () => {
+  // Some providers omit item.call_id on function_call_arguments.* events.
+  // We must still attach the deltas to the right slot via output_index,
+  // otherwise the tool call is silently lost.
+  it('recovers the tool_use via output_index when call_id is missing', () => {
+    const sse = sseChunk([
+      { type: 'response.created', response: { id: 'resp-5', model: 'gpt-5' } },
+      { type: 'response.output_item.added', item: { type: 'function_call', id: 'fc-1', call_id: 'call-1', name: 'read_file', output_index: 0 } },
+      // Provider omits call_id in the delta; only output_index is present.
+      { type: 'response.function_call_arguments.delta', item: { output_index: 0 }, delta: '{"path":' },
+      { type: 'response.function_call_arguments.delta', item: { output_index: 0 }, delta: '"/x"}' },
+      { type: 'response.function_call_arguments.done', item: { output_index: 0 } },
+      { type: 'response.completed', response: { id: 'resp-5', model: 'gpt-5', usage: {} } },
+    ]);
+    const result = accumulateOpenaiResponsesSse([sse]);
+    expect(result).not.toBeNull();
+    const toolUse = result!.content.find((b) => b.type === 'tool_use');
+    expect(toolUse).toBeDefined();
+    if (toolUse!.type === 'tool_use') {
+      expect(toolUse.name).toBe('read_file');
+      expect(toolUse.input).toEqual({ path: '/x' });
+    }
+  });
+
+  it('uses a synthetic per-output_index key when no call_id is provided at all', () => {
+    const sse = sseChunk([
+      { type: 'response.created', response: { id: 'resp-6', model: 'gpt-5' } },
+      // output_item.added with no call_id; only output_index 0.
+      { type: 'response.output_item.added', item: { type: 'function_call', name: 'no_id_tool', output_index: 0 } },
+      { type: 'response.function_call_arguments.delta', item: { output_index: 0 }, delta: '{"k":1}' },
+      { type: 'response.function_call_arguments.done', item: { output_index: 0 } },
+      { type: 'response.completed', response: { id: 'resp-6', model: 'gpt-5', usage: {} } },
+    ]);
+    const result = accumulateOpenaiResponsesSse([sse]);
+    expect(result).not.toBeNull();
+    const toolUse = result!.content.find((b) => b.type === 'tool_use');
+    expect(toolUse).toBeDefined();
+    if (toolUse!.type === 'tool_use') {
+      expect(toolUse.name).toBe('no_id_tool');
+      expect(toolUse.input).toEqual({ k: 1 });
+    }
+  });
+
+  it('does not cross-attach when call_id is present on one event and missing on another', () => {
+    // First delta uses call_id correctly, second uses only output_index.
+    // The output_index map should still point at the same tool.
+    const sse = sseChunk([
+      { type: 'response.created', response: { id: 'resp-7', model: 'gpt-5' } },
+      { type: 'response.output_item.added', item: { type: 'function_call', id: 'fc-1', call_id: 'call-1', name: 'mix_tool', output_index: 0 } },
+      { type: 'response.function_call_arguments.delta', item: { call_id: 'call-1' }, delta: '{"a":' },
+      { type: 'response.function_call_arguments.delta', item: { output_index: 0 }, delta: '1}' },
+      { type: 'response.function_call_arguments.done', item: { call_id: 'call-1' } },
+      { type: 'response.completed', response: { id: 'resp-7', model: 'gpt-5', usage: {} } },
+    ]);
+    const result = accumulateOpenaiResponsesSse([sse]);
+    expect(result).not.toBeNull();
+    const toolUses = result!.content.filter((b) => b.type === 'tool_use');
+    expect(toolUses.length).toBe(1);
+    if (toolUses[0].type === 'tool_use') {
+      expect(toolUses[0].name).toBe('mix_tool');
+      expect(toolUses[0].input).toEqual({ a: 1 });
+    }
+  });
+});

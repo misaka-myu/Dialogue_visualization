@@ -1,7 +1,7 @@
 // src/main/index.ts
 import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
-import { registerIpc, installLiveStoreQuitHook } from './ipc';
+import { registerIpc, installLiveStoreQuitHook, flushPendingLiveSession } from './ipc';
 import { restoreAllDirty } from './configGuard';
 
 // Disable GPU shader disk cache to prevent Windows file-lock errors (ERROR:cache_util_win.cc 0x5)
@@ -56,5 +56,9 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // E-1 fix: flush the live capture BEFORE quitting. before-quit should also
+  // trigger this, but on Linux/Windows the renderer can be torn down before
+  // before-quit's synchronous listeners run to completion.
+  try { flushPendingLiveSession(); } catch (err) { console.error('[ipc] flush on window-all-closed failed:', err); }
   if (process.platform !== 'darwin') app.quit();
 });

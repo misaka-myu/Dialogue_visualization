@@ -21,7 +21,15 @@ export class SessionStore {
   loadSession(id: string): Session | null {
     const path = this.path(id);
     if (!existsSync(path)) return null;
-    return JSON.parse(readFileSync(path, 'utf-8')) as Session;
+    try {
+      return JSON.parse(readFileSync(path, 'utf-8')) as Session;
+    } catch (err) {
+      // D-4: corrupt file used to throw straight to the IPC handler,
+      // which crashed the renderer. Return null + warn so the UI can
+      // keep working and the user can see why the session is gone.
+      console.error('[session-store] loadSession(' + id + ') failed:', err);
+      return null;
+    }
   }
 
   listSessions(): string[] {

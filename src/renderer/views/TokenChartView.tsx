@@ -18,7 +18,7 @@ const PADDING_LEFT = 60;
 const PADDING_RIGHT = 16;
 const PADDING_TOP = 16;
 const PADDING_BOTTOM = 48;
-const BAR_GAP = 6;
+const BAR_GAP = 4;
 const COLORS = {
   cache_creation: '#ba68c8',
   input: '#64b5f6',
@@ -56,13 +56,13 @@ export function TokenChartView() {
   }
 
   // Aggregate into buckets when the session has many rounds. Without
-  // this, CHART_WIDTH is fixed at 880 and ~130+ rounds make each bar
-  // clip to 4px; ~2000+ rounds would render past the SVG bounds with
-  // the y-axis labels still assuming a 880px canvas. Bucketing keeps
-  // the chart legible at any session size. The threshold / bucket
-  // size are picked so the chart stays readable on a typical window
-  // width: 80 bars at ~10px each fits comfortably.
-  const BUCKET_THRESHOLD = 80;
+  // this, ~130+ rounds make each bar clip to ~4px; ~2000+ rounds would
+  // render past the SVG bounds with the y-axis labels still assuming
+  // a 880px canvas. Bucketing keeps the chart legible at any session
+  // size. The threshold is high enough that typical sessions (~50-80
+  // rounds) stay unbucketed, and the chart stays readable on a
+  // typical window width.
+  const BUCKET_THRESHOLD = 120;
   const display: { rounds: RoundTokenData[]; isBucket: boolean; firstRound: number; lastRound: number }[] = [];
   if (series.length > BUCKET_THRESHOLD) {
     // Aim for ~BUCKET_THRESHOLD bars; round bucket size up.
@@ -95,12 +95,32 @@ export function TokenChartView() {
   const niceMax = niceCeil(maxStack * 1.1);
 
   // Width scales with the number of bars so the SVG never overflows.
-  const BAR_TARGET_WIDTH = 10;
-  const barW = Math.max(4, BAR_TARGET_WIDTH);
+  // For unbucketed charts, each label is "R{n}" (~3 chars). For
+  // bucketed charts, labels are "R{a}-{b}" (~7 chars). Pick a bar
+  // pitch (barW + BAR_GAP) wide enough to fit the longest label so
+  // adjacent labels don't overlap, then derive barW from that.
+  const MIN_BAR_W = 4;
+  // For unbucketed bars, cap at 14 so the chart doesn't get visually
+  // heavy for a small session. For bucketed bars, allow up to the
+  // pitch so adjacent labels don't overlap when many buckets are
+  // needed (a 144-round session needs ~12 visible labels at ≥36px
+  // pitch, which forces the bar to be ~32px wide).
+  const isBucketed = series.length > BUCKET_THRESHOLD;
+  const MAX_BAR_W = isBucketed ? 40 : 14;
+  const MIN_PITCH = isBucketed ? 36 : 24;
+  const pitch = Math.max(MIN_PITCH, MIN_BAR_W + BAR_GAP);
+  const barW = Math.max(
+    MIN_BAR_W,
+    Math.min(MAX_BAR_W, pitch - BAR_GAP),
+  );
   const totalW = PADDING_LEFT + display.length * (barW + BAR_GAP) + PADDING_RIGHT - BAR_GAP;
   const chartW = Math.max(CHART_WIDTH, totalW);
   const innerW = chartW - PADDING_LEFT - PADDING_RIGHT;
   const innerH = CHART_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
+
+  // Label throttling: only show every Nth label so the x-axis stays
+  // readable when the chart is dense. Aim for ~12 visible labels.
+  const labelStep = Math.max(1, Math.ceil(display.length / 12));
 
   return (
     <div style={{ padding: '12px 16px', overflow: 'auto' }}>
@@ -172,18 +192,21 @@ export function TokenChartView() {
           return (
             <g key={i} onMouseEnter={() => setHoverIdx(i)} onMouseLeave={() => setHoverIdx(null)}>
               {rendered}
-              {/* X-axis label: round number (or "R{first}-{last}" for a bucket) */}
-              <text
-                x={x + barW / 2}
-                y={CHART_HEIGHT - PADDING_BOTTOM + 14}
-                fontSize={10}
-                fill={COLORS.label}
-                textAnchor="middle"
-              >
-                {d.isBucket
-                  ? `R${d.firstRound}-${d.lastRound}`
-                  : `R${d.firstRound}`}
-              </text>
+              {/* X-axis label: round number (or "R{first}-{last}" for a bucket).
+                  Throttle to ~12 visible labels so adjacent text never overlaps. */}
+              {(i % labelStep === 0 || i === display.length - 1) && (
+                <text
+                  x={x + barW / 2}
+                  y={CHART_HEIGHT - PADDING_BOTTOM + 14}
+                  fontSize={10}
+                  fill={COLORS.label}
+                  textAnchor="middle"
+                >
+                  {d.isBucket
+                    ? `R${d.firstRound}-${d.lastRound}`
+                    : `R${d.firstRound}`}
+                </text>
+              )}
               {/* Source marker (real vs estimated) — short bar below the label */}
               <line
                 x1={x + barW / 2 - 6}
@@ -193,16 +216,18 @@ export function TokenChartView() {
                 stroke={source === 'real' ? COLORS.output : COLORS.estimate}
                 strokeWidth={2}
               />
-              {d.rounds.some((r) => r.model) && (
+              {/* Model name under each bar — throttled to match the
+                  round-label step so adjacent model text never overlaps. */}
+              {(i % labelStep === 0 || i === display.length - 1) && (
                 <text
                   x={x + barW / 2}
                   y={CHART_HEIGHT - PADDING_BOTTOM + 36}
-                  fontSize={9}
+                  fontSize={8}
                   fill={COLORS.label}
                   textAnchor="middle"
-                  opacity={0.6}
+                  opacity={0.5}
                 >
-                  {d.rounds.find((r) => r.model)?.model}
+                  {d.rounds.find((r) => r.model)?.model ?? ''}
                 </text>
               )}
             </g>
@@ -213,7 +238,8 @@ export function TokenChartView() {
           <Tooltip
             data={{
               roundNumber: display[hoverIdx].firstRound,
-              userIndex: 0,
+              // BUG-2c: use the first round's real userIndex instead of a hard-coded 0.
+              userIndex: display[hoverIdx].rounds[0]?.userIndex ?? 0,
               source: display[hoverIdx].rounds.every((r) => r.source === 'real') ? 'real' : 'estimate',
               inputTokens: display[hoverIdx].rounds.reduce((a, r) => a + r.inputTokens, 0),
               outputTokens: display[hoverIdx].rounds.reduce((a, r) => a + r.outputTokens, 0),
@@ -294,8 +320,8 @@ function Tooltip({
   );
 }
 
-/** Round up to a "nice" axis max (1, 2, 5 × 10^n). */
-function niceCeil(n: number): number {
+/** Round up to a "nice" axis max (1, 2, 5 × 10^n). Exported for unit tests. */
+export function niceCeil(n: number): number {
   if (n <= 1) return 1;
   const exp = Math.floor(Math.log10(n));
   const base = Math.pow(10, exp);
@@ -308,8 +334,8 @@ function niceCeil(n: number): number {
   return nice * base;
 }
 
-/** 5 nice y-tick values from 0..max. */
-function yTicks(max: number): number[] {
+/** 5 nice y-tick values from 0..max. Exported for unit tests. */
+export function yTicks(max: number): number[] {
   const step = max / 5;
   return [0, step, step * 2, step * 3, step * 4, max].map((v) => Math.round(v));
 }

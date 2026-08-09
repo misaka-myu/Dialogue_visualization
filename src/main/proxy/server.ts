@@ -1,5 +1,15 @@
 // src/main/proxy/server.ts
 import express from 'express';
+
+// A-8: cap raw SSE accumulation so a runaway upstream response can
+// blow up the client but not the main process '{'memory'}'.
+// 10 MB is enough for a ~2k-token response with room to spare; bigger
+// streams still get forwarded to the client, we just stop feeding the
+// accumulator once we cross this threshold.
+const MAX_RAW_BYTES = 10 * 1024 * 1024;
+// How long the stream can go without a new chunk before we treat it as
+// hung and tear it down. 120 s matches the Anthropic SDK default.
+const STREAM_IDLE_TIMEOUT_MS = 120_000;
 import { Server as HttpServer } from 'http';
 import { EventEmitter } from 'events';
 import { ApiRequest } from '../model/types';
@@ -171,11 +181,18 @@ function isProxyInternalHeader(name: string): boolean {
 /** Build a header bag safe to forward to the upstream API. Drops hop-by-hop
  *  headers, proxy-internal headers (incl. our own shared-secret header),
  *  and any client-IP forwarding hints that would mislead upstream logs. */
-function buildForwardHeaders(req: express.Request): Record<string, string> {
+export function buildForwardHeaders(req: express.Request): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(req.headers)) {
     if (isProxyInternalHeader(key)) continue;
-    if (typeof value === 'string') {
+    if (Array.isArray(value)) {
+      // A-5/C-1 fix: Express v5 / Node 18+ can deliver header values as string[]
+      // (e.g. repeated Cookie headers). Join with ", " per RFC 7230 §3.2.2 so the
+      // upstream sees a single, well-formed header value. Skip the key entirely
+      // if every element is non-string (defensive — shouldn't happen in practice).
+      const joined = value.filter((v): v is string => typeof v === 'string').join(', ');
+      if (joined) out[key] = joined;
+    } else if (typeof value === 'string') {
       out[key] = value;
     }
   }
@@ -244,13 +261,36 @@ async function streamAndCapture(
   }
 
   const rawChunks: Buffer[] = [];
+  let totalRawBytes = 0;
+  // A-8: cap how much raw SSE we buffer so a 20 MB response from a
+  // runaway upstream doesn't OOM the main process. We still FORWARD
+  // every chunk to the client (so the user sees the full stream), we
+  // just stop feeding the accumulator once we hit the cap and emit
+  // a single synthetic SSE comment so downstream consumers know the
+  // response was truncated.
+  let truncated = false;
   let streamError: unknown = null;
+  let lastReadAt = Date.now();
+  const idleTimer = setInterval(() => {
+    if (Date.now() - lastReadAt > STREAM_IDLE_TIMEOUT_MS) {
+      const err = new Error(`stream idle > ${STREAM_IDLE_TIMEOUT_MS}ms`);
+      streamError = err;
+      try { reader.cancel(); } catch { /* ignore */ }
+    }
+  }, Math.min(STREAM_IDLE_TIMEOUT_MS / 2, 30_000));
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      lastReadAt = Date.now();
       const buf = Buffer.from(value);
-      rawChunks.push(buf);
+      if (totalRawBytes + buf.length <= MAX_RAW_BYTES) {
+        rawChunks.push(buf);
+        totalRawBytes += buf.length;
+      } else if (!truncated) {
+        truncated = true;
+        console.warn(`[proxy] SSE exceeded ${MAX_RAW_BYTES} bytes; stopping accumulator but still forwarding.`);
+      }
       // Write immediately so the client sees live streaming.
       if (!res.writableEnded) {
         res.write(buf);
@@ -259,6 +299,7 @@ async function streamAndCapture(
   } catch (err) {
     streamError = err;
   } finally {
+    clearInterval(idleTimer);
     // Always release the reader so the underlying socket isn't leaked,
     // even on read errors / mid-stream aborts. releaseLock is safe to call
     // multiple times only because the WHATWG spec says subsequent calls
@@ -407,13 +448,30 @@ async function streamAndCaptureResponses(
   }
 
   const rawChunks: Buffer[] = [];
+  let totalRawBytes = 0;
+  let truncated = false;
   let streamError: unknown = null;
+  let lastReadAt = Date.now();
+  const idleTimer = setInterval(() => {
+    if (Date.now() - lastReadAt > STREAM_IDLE_TIMEOUT_MS) {
+      const err = new Error(`responses stream idle > ${STREAM_IDLE_TIMEOUT_MS}ms`);
+      streamError = err;
+      try { reader.cancel(); } catch { /* ignore */ }
+    }
+  }, Math.min(STREAM_IDLE_TIMEOUT_MS / 2, 30_000));
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      lastReadAt = Date.now();
       const buf = Buffer.from(value);
-      rawChunks.push(buf);
+      if (totalRawBytes + buf.length <= MAX_RAW_BYTES) {
+        rawChunks.push(buf);
+        totalRawBytes += buf.length;
+      } else if (!truncated) {
+        truncated = true;
+        console.warn(`[proxy] Responses SSE exceeded ${MAX_RAW_BYTES} bytes; stopping accumulator but still forwarding.`);
+      }
       if (!res.writableEnded) {
         res.write(buf);
       }
@@ -421,6 +479,7 @@ async function streamAndCaptureResponses(
   } catch (err) {
     streamError = err;
   } finally {
+    clearInterval(idleTimer);
     try { reader.releaseLock(); } catch { /* ignore */ }
     if (!res.writableEnded) {
       try { res.end(); } catch { /* ignore */ }

@@ -121,7 +121,12 @@ interface LiveRuntime {
   lastSize: number;
 }
 let liveRuntime: LiveRuntime | null = null;
-const SAVE_DEBOUNCE_MS = 500;
+// E-1 fix: shrink the debounce window so a force-kill (SIGKILL / Task Manager
+// End-Task) has a much smaller blast radius. 500ms was a perf optimisation; 100ms
+// still batches rapid request bursts and shrinks worst-case data loss from
+// "half a second of capture" to "a tenth of a second". The before-quit hook
+// below still does a final synchronous flush so the common case is unchanged.
+const SAVE_DEBOUNCE_MS = 100;
 
 function ensureLiveStore(): PersistentLiveStore {
   if (!liveStore) liveStore = new PersistentLiveStore(claudeProjectsDir());
@@ -200,13 +205,19 @@ function flushLiveSave(): void {
 
 export function registerIpc(): void {
   ipcMain.handle('sessions:list', async (): Promise<SessionMeta[]> => {
-    return scanClaudeSessions(claudeProjectsDir());
+    try {
+      return scanClaudeSessions(claudeProjectsDir());
+    } catch (err) {
+      console.error('[ipc] sessions:list failed:', err);
+      return [];
+    }
   });
 
   ipcMain.handle('sessions:load', async (_e, sourcePath: string): Promise<Session | null> => {
     try {
       return loadClaudeSession(sourcePath);
-    } catch {
+    } catch (err) {
+      console.error('[ipc] sessions:load failed for ' + sourcePath + ':', err);
       return null;
     }
   });
@@ -216,13 +227,18 @@ export function registerIpc(): void {
     try {
       return ensureLiveStore().listSessions();
     } catch (err) {
-      console.error('[live-store] list failed:', err);
+      console.error('[ipc] live:list failed:', err);
       return [];
     }
   });
 
   ipcMain.handle('live:load', async (_e, path: string): Promise<Session | null> => {
-    return ensureLiveStore().loadSession(path);
+    try {
+      return ensureLiveStore().loadSession(path);
+    } catch (err) {
+      console.error('[ipc] live:load failed for ' + path + ':', err);
+      return null;
+    }
   });
 
   ipcMain.handle('live:save', async (_e, session: Session): Promise<string> => {
@@ -292,13 +308,19 @@ export function registerIpc(): void {
   // --- Codex sessions (scan / load / delete / export) ---
 
   ipcMain.handle('codex:list', async (): Promise<CodexSessionMeta[]> => {
-    return scanCodexSessions(codexHome());
+    try {
+      return scanCodexSessions(codexHome());
+    } catch (err) {
+      console.error('[ipc] codex:list failed:', err);
+      return [];
+    }
   });
 
   ipcMain.handle('codex:load', async (_e, sourcePath: string): Promise<Session | null> => {
     try {
       return loadCodexSession(sourcePath);
-    } catch {
+    } catch (err) {
+      console.error('[ipc] codex:load failed for ' + sourcePath + ':', err);
       return null;
     }
   });
