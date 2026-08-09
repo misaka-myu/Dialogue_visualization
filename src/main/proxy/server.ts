@@ -85,6 +85,14 @@ export async function startProxyServer(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       server = await listenOnPort(app, port);
+      // Resolve the OS-assigned port when binding to 0 (or anything
+      // the kernel remapped). Without this, callers using port 0 to
+      // let the OS pick a free port would get back `0` and their
+      // fetch() calls would target the wrong socket.
+      const addr = server.address();
+      if (addr && typeof addr === 'object') {
+        port = addr.port;
+      }
       break;
     } catch (err: any) {
       if (err?.code === 'EADDRINUSE' && attempt < maxAttempts - 1) {
@@ -111,7 +119,11 @@ export async function startProxyServer(
 
 function listenOnPort(app: express.Express, port: number): Promise<HttpServer> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(port);
+    // Pin to IPv4 loopback. Without this, Node listens on `::` (IPv6) on
+    // most platforms, which on dual-stack boxes makes `127.0.0.1:<port>`
+    // fetch calls fail with EADDRNOTAVAIL. We never want to be reachable
+    // outside localhost anyway.
+    const server = app.listen(port, '127.0.0.1');
     server.once('listening', () => resolve(server));
     server.once('error', reject);
   });
