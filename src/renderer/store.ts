@@ -5,7 +5,7 @@ import { SessionMeta } from '../main/adapters/claude-log';
 import { CodexSessionMeta } from '../main/adapters/codex-log';
 import { LiveMeta } from '../main/store/persistent-store';
 
-export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log' | 'api-inspector';
+export type ViewKind = 'chat-flow' | 'json-tree' | 'raw-log' | 'api-inspector' | 'token-chart';
 
 interface State {
   sessions: SessionMeta[];

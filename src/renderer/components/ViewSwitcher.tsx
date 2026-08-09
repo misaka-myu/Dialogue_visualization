@@ -13,6 +13,7 @@ export function ViewSwitcher() {
   const views: { kind: ViewKind; label: string }[] = [
     { kind: 'chat-flow', label: '💬 对话流' },
     { kind: 'api-inspector', label: '📡 API 请求明细' },
+    { kind: 'token-chart', label: '📊 Token 用量' },
     { kind: 'json-tree', label: 'JSON 树' },
   ];
   // Proxy-live captures only see structured API traffic, not the underlying
